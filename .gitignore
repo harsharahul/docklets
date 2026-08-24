@@ -1,0 +1,10 @@
+.DS_Store
+node_modules/
+*.log
+
+# internal working notes are never tracked
+HANDOFF.md
+PLAN.md
+*.local.md
+.claude/
+.playwright-mcp/

@@ -1,0 +1,17 @@
+{
+  "name": "docklets",
+  "version": "0.1.0",
+  "description": "A filesystem is your deploy API: one directory becomes a self-hosted app platform where writing files is the only deploy step.",
+  "license": "MIT",
+  "author": "Harsha Rahul Boggaram",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harsharahul/docklets.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check": "node --check bin/deployer.mjs && bash -n bin/serve.sh install/install-macos.sh install/install-linux.sh install/uninstall-macos.sh"
+  }
+}

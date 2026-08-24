@@ -1,0 +1,5 @@
+{
+  "runtime": "node",
+  "entry": "server.js",
+  "port": 3000
+}

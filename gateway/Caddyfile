@@ -1,0 +1,37 @@
+# docklets gateway config. Runs INSIDE the hardened Caddy container.
+#
+# The container sees ONLY the asset root (mounted read-only at /srv); the host
+# filesystem is absent, so a symlink or path traversal inside an asset cannot
+# reach host files.
+#
+# The admin endpoint is bound to localhost INSIDE the container's network
+# namespace (never published). It exists only so the deployer can
+# `docker exec <gateway> caddy reload` for zero-downtime route updates.
+{
+	admin localhost:2019
+	auto_https off
+	persist_config off
+}
+
+http://:8080 {
+	root * /srv
+	encode gzip
+
+	# Dynamic app routes maintained by the deployer. reverse_proxy terminates
+	# matched requests, so proxied slugs never fall through to file_server.
+	import /etc/caddy/routes/*.caddy
+
+	file_server browse {
+		hide .gateway .data .git .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	log {
+		output stdout
+	}
+}

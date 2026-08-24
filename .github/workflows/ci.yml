@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Syntax checks (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax-check deployer and shell scripts
+        run: npm run check
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q shellcheck
+          shellcheck -S warning bin/serve.sh install/*.sh
+
+  smoke:
+    name: End-to-end smoke test
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Start gateway and converge examples
+        run: |
+          TESTROOT="$(mktemp -d)"
+          echo "TESTROOT=$TESTROOT" >> "$GITHUB_ENV"
+          cp -R examples/guestbook examples/hello-static "$TESTROOT"/
+          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_PORT=8081 \
+            DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw ./bin/serve.sh &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:8081/ && break; sleep 2
+          done
+          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            node bin/deployer.mjs --once
+      - name: Verify static asset
+        run: |
+          curl -sf http://localhost:8081/hello-static/ | grep -q "It works"
+      - name: Verify docklet API round-trip and persistence
+        run: |
+          for i in $(seq 1 15); do
+            curl -sf -o /dev/null http://localhost:8081/guestbook/ && break; sleep 2
+          done
+          curl -sf -X POST http://localhost:8081/guestbook/api/messages \
+            -H 'content-type: application/json' -d '{"text":"ci"}' | grep -q '"ok":true'
+          curl -sf http://localhost:8081/guestbook/api/messages | grep -q '"text":"ci"'
+          grep -q '"text": "ci"' "$TESTROOT/.data/guestbook/messages.json"
+      - name: Verify app container hardening
+        run: |
+          docker inspect dk-ci-guestbook \
+            --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}}' | \
+            grep -q 'ALL.*map\[\]'
+      - name: Verify removal lifecycle
+        run: |
+          rm "$TESTROOT/guestbook/app.json"
+          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            node bin/deployer.mjs --once
+          if docker ps -a --format '{{.Names}}' | grep -q '^dk-ci-guestbook$'; then
+            echo "container should have been removed" && exit 1
+          fi
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f dk-ci-gw 2>/dev/null || true
+          docker ps -aq --filter label=docklet | xargs -r docker rm -f
+          docker network rm dk-ci 2>/dev/null || true
