@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The gateway root (`/`) now redirects to the status dashboard instead of
+  serving a browsable file index, so a public deployment no longer enumerates
+  every slug. Individual routes are unaffected. The installers deploy the
+  dashboard to `/status/` by default so the redirect always resolves.
+
+### Security
+
+- `admin-ui.html` is added to the gateway hide list, so installs that keep the
+  deployer inside the asset root do not serve the admin UI shell publicly.
+
 ## [0.2.0] - 2026-08-25
 
 ### Added

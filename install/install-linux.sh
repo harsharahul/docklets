@@ -18,6 +18,12 @@ mkdir -p "$UNITS" "$ROOT/.gateway/logs"
 [ -n "$NODE_BIN" ] || { echo "node >= 20 is required on PATH"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "docker daemon is not reachable"; exit 1; }
 
+# Deploy the read-only status dashboard so the root redirect (/ -> /status/)
+# always has a target. Never overwrite a dashboard the operator customized.
+if [ ! -e "$ROOT/status" ]; then
+  cp -R "$REPO/dashboard" "$ROOT/status"
+fi
+
 cat > "$UNITS/docklets-gateway.service" <<EOF
 [Unit]
 Description=docklets gateway (hardened Caddy container)
