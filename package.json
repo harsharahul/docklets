@@ -1,6 +1,6 @@
 {
   "name": "docklets",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A filesystem is your deploy API: one directory becomes a self-hosted app platform where writing files is the only deploy step.",
   "license": "MIT",
   "author": "Harsha Rahul Boggaram",
