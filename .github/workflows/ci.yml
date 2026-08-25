@@ -130,6 +130,14 @@ jobs:
           if curl -s http://127.0.0.1:8081/ | grep -q 'guestbook'; then
             echo "::error::root still lists slugs"; exit 1
           fi
+          # agent instruction files in the root are never served publicly
+          sed -e "s|<ASSETS>|$TESTROOT|g" -e "s|<HOST>|http://127.0.0.1:8081|g" AGENTS.md | grep -v '^>' > "$TESTROOT/AGENTS.md"
+          ln -s AGENTS.md "$TESTROOT/CLAUDE.md"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/AGENTS.md)" = "404" ] \
+            || { echo "::error::AGENTS.md publicly served"; exit 1; }
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/CLAUDE.md)" = "404" ] \
+            || { echo "::error::CLAUDE.md publicly served"; exit 1; }
+          grep -q "$TESTROOT" "$TESTROOT/AGENTS.md" || { echo "::error::AGENTS.md placeholders not filled"; exit 1; }
       - name: Verify admin plane security properties
         run: |
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \

@@ -32,13 +32,14 @@ Verify: `curl -sf http://localhost:8080/` returns the asset listing, and
 
 ## 2. Deploy the status dashboard (recommended)
 
-The read-only dashboard is itself a static asset:
+The installers deploy the dashboard to `<asset-root>/status` automatically.
+For a pre-existing install, copy it in manually:
 
 ```bash
 cp -R dashboard <asset-root>/status
 ```
 
-It is then live at `http://localhost:8080/status/`, listing every app with its
+It is live at `http://localhost:8080/status/`, listing every app with its
 run state. It is read-only and public like every other asset; it never asks
 for a token.
 
@@ -61,10 +62,13 @@ The admin plane is a token-authenticated local daemon for lifecycle actions
 ## 4. Publish content
 
 Follow the repository's `AGENTS.md` for the publishing rules (slug naming,
-relative links, the `app.json` manifest, persistent `/data`). If you are the
-agent that will publish for this user, add the `AGENTS.md` instructions to
-your standing instructions with `<ASSETS>` set to the asset root and `<HOST>`
-set to how the user reaches the gateway.
+relative links, the `app.json` manifest, persistent `/data`). The installers also
+drop a filled-in `AGENTS.md` (with a `CLAUDE.md` symlink) into the asset root,
+so agents that read those files from their working directory need no further
+setup. If you are the agent that will publish for this user and do not work
+from that directory, add the `AGENTS.md` instructions to your standing
+instructions with `<ASSETS>` set to the asset root and `<HOST>` set to how the
+user reaches the gateway.
 
 ## 5. Operate
 

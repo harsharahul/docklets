@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The installers drop a filled-in `AGENTS.md` (plus a `CLAUDE.md` symlink)
+  into the asset root, so any coding agent opened in that folder picks up the
+  publishing instructions automatically. Both files are hidden from public
+  serving. The README gains per-harness quick-start instructions.
+
 ## [0.2.1] - 2026-08-25
 
 ### Changed

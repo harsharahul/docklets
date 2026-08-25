@@ -29,7 +29,7 @@ http://:8080 {
 
 	# No `browse`: a directory without index.html 404s instead of listing files.
 	file_server {
-		hide .gateway .data .git admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
+		hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
 	}
 
 	header {

@@ -199,14 +199,26 @@ Full specification: [docs/manifest.md](docs/manifest.md).
 
 ## Using it with an AI agent
 
-1. Give the agent **read-write access to the asset root and nothing else**
-   (bind-mount it into the agent's sandbox).
-2. Paste [`AGENTS.md`](AGENTS.md) into the agent's system prompt / standing
-   instructions.
-3. That is the whole integration. The agent deploys by writing files; the
-   platform does the rest. It was developed for and runs in production under
-   [NanoClaw](https://github.com/qwibitai/nanoclaw) agents, but nothing here
-   is agent-framework-specific.
+The installers drop a filled-in `AGENTS.md` (and a `CLAUDE.md` symlink to it)
+into the asset root, hidden from public serving. Any agent that reads those
+files from its working directory picks up the publishing rules automatically.
+The whole integration is: give the agent the folder.
+
+Quick start per harness:
+
+| Your agent | What to do |
+|---|---|
+| **Codex, Cursor, Jules, Zed, Amp** (AGENTS.md-aware) | Open the agent in the asset root (e.g. `cd ~/docklets && codex`). Nothing else; it reads `AGENTS.md` on its own |
+| **Claude Code** | Same: run it in the asset root. The `CLAUDE.md` symlink points at the same instructions. The repo also ships `skills/docklets/SKILL.md` for a skill-driven install |
+| **NanoClaw** | Mount the asset root read-write into the agent group and paste `AGENTS.md` into the group's `instructions.prepend.md` |
+| **Anything else** (custom SDK agent, other CLIs) | Paste `AGENTS.md` into its system prompt / standing instructions, with `<ASSETS>` set to the mounted path and `<HOST>` to the gateway URL |
+
+Then just talk: "build me a poll and publish it". The agent writes files; the
+platform does the rest. Give the agent **read-write access to the asset root
+and nothing else**; that mount is the entire permission model. Developed for
+and running in production under
+[NanoClaw](https://github.com/qwibitai/nanoclaw) agents, but nothing here is
+agent-framework-specific.
 
 ## Exposing it to the internet
 
