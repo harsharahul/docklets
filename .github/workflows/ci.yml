@@ -75,10 +75,19 @@ jobs:
             docker logs dk-ci-gw 2>&1 | tail -20
             exit 1
           }
-          POST="$(curl -sf -X POST http://127.0.0.1:8081/guestbook/api/messages \
-            -H 'content-type: application/json' -d '{"text":"ci"}')"
+          POST="$(curl -s -X POST http://127.0.0.1:8081/guestbook/api/messages \
+            -H 'content-type: application/json' -d '{"text":"ci"}' \
+            -w '\nHTTP_STATUS:%{http_code}')"
           echo "POST response: $POST"
-          echo "$POST" | grep -q '"ok":true'
+          echo "$POST" | grep -q 'HTTP_STATUS:201' || {
+            echo "::error::POST did not return 201"
+            echo "app logs:";     docker logs dk-ci-guestbook 2>&1 | tail -20
+            echo "gateway logs:"; docker logs dk-ci-gw 2>&1 | tail -10
+            echo "/data inside the container:"
+            docker exec dk-ci-guestbook ls -la /data
+            docker exec dk-ci-guestbook sh -c 'touch /data/w-probe && echo "/data writable" || echo "/data NOT writable"'
+            exit 1
+          }
           GET="$(curl -sf http://127.0.0.1:8081/guestbook/api/messages)"
           echo "GET response: $GET"
           echo "$GET" | grep -q '"text":"ci"'
