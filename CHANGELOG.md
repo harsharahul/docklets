@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Public status feed: the deployer writes a minimal `.status.json` (slug and
+  coarse run state only) into the asset root on every converge pass.
+- Read-only status dashboard shipped in `dashboard/`, deployable as a plain
+  static asset.
+- Opt-in local admin plane (`DOCKLETS_ADMIN_PORT`): token-authenticated UI
+  and API on 127.0.0.1 with restart, pause, resume, and capped log tailing.
+  Token stored outside the asset root; strict Host allowlist; no cookies and
+  no CORS grants. Pause and resume are manifest renames applied by the
+  converge loop.
+- Agent setup skill at `skills/docklets/SKILL.md` covering install, dashboard,
+  admin plane, and publishing wiring.
+
+### Security
+
+- CI now asserts the admin plane's properties: 401 without the token, 403 on
+  foreign Host headers, absence of CORS grants, slug validation, log tail cap,
+  and that the public status feed carries no ports, paths, or hashes.
+
 ## [0.1.0] - 2026-08-24
 
 ### Added

@@ -216,6 +216,37 @@ The gateway binds one port (default 8080). Point any reverse proxy at it
 reachable from outside: not the deployer, not the admin endpoint, not the app
 containers.
 
+## Dashboard and admin plane
+
+**Status dashboard** (read-only, public): the deployer writes a minimal
+`.status.json` into the asset root each pass (slug and coarse run state only:
+no ports, paths, or hashes). The bundled dashboard renders it and is itself
+just a static asset:
+
+```bash
+cp -R dashboard <asset-root>/status     # live at /status/
+```
+
+It never asks for a credential; anything that does is not this dashboard.
+
+**Admin plane** (opt-in, local-only): set `DOCKLETS_ADMIN_PORT=2020` in the
+deployer's environment and it serves a token-authenticated UI and API at
+`http://127.0.0.1:2020/` with lifecycle actions (restart, pause, resume) and
+log tailing. The token lives at `~/.config/docklets/admin-token`, outside the
+asset root, so agents and apps can never read it. The daemon binds loopback
+only, enforces a strict Host allowlist (DNS rebinding), sends no CORS grants,
+and uses no cookies. Deploying and deleting remain filesystem operations;
+there is no deploy-over-HTTP anywhere. Details in
+[SECURITY.md](SECURITY.md#admin-plane).
+
+## Agent setup skill
+
+`skills/docklets/SKILL.md` lets a coding agent (Claude Code and similar)
+install and operate docklets end to end: prerequisite checks, installer,
+dashboard, admin plane, and wiring `AGENTS.md` into the agent's own
+instructions. Point your agent at the file, or copy it into your skills
+directory.
+
 ## Security model
 
 Read [SECURITY.md](SECURITY.md) for the full threat model, verified boundary

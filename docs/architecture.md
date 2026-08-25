@@ -91,3 +91,19 @@ client → gateway :8080
 
 Apps therefore see prefix-stripped paths: a request to `/<slug>/api/x`
 arrives at the app as `/api/x`.
+
+## Status feed and admin plane
+
+Each converge pass ends by atomically writing `<root>/.status.json`: slug and
+coarse state (`running`, `starting`, `exited`, `paused`) for apps, plus the
+static slug list. The file is served by the gateway like any asset, so it
+carries nothing beyond what the public listing already reveals.
+
+With `DOCKLETS_ADMIN_PORT` set, the deployer also serves a local admin plane
+(UI and JSON API) on `127.0.0.1`. Authentication is a bearer token stored at
+`~/.config/docklets/admin-token`, outside the asset root. Endpoints:
+`GET /api/status` (rich view: runtime, port, hash, container status),
+`GET /api/logs/<slug>?tail=n` (capped at 500), and
+`POST /api/restart|pause|resume/<slug>`. Pause renames the manifest to
+`app.json.paused`; the converge loop removes the container and its route, and
+resume renames it back. The security design is documented in SECURITY.md.

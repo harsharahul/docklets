@@ -99,6 +99,64 @@ jobs:
           docker inspect dk-ci-guestbook \
             --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}}' | \
             grep -q 'ALL.*map\[\]'
+      - name: Verify status feed and dashboard
+        run: |
+          test -f "$TESTROOT/.status.json"
+          python3 - "$TESTROOT/.status.json" <<'EOF'
+          import json, sys
+          s = json.load(open(sys.argv[1]))
+          apps = {a["slug"]: a for a in s["apps"]}
+          assert apps["guestbook"]["state"] == "running", apps
+          assert "hello-static" in s["static"], s
+          for a in s["apps"]:
+              assert set(a) <= {"slug", "state"}, f"public feed leaks fields: {a}"
+          print("status feed OK:", s)
+          EOF
+          cp -R dashboard "$TESTROOT/status"
+          sleep 1
+          curl -sf http://127.0.0.1:8081/status/ | grep -q "docklets"
+          curl -sf http://127.0.0.1:8081/.status.json | grep -q '"guestbook"'
+      - name: Verify admin plane security properties
+        run: |
+          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            DOCKLETS_POLL_MS=1500 DOCKLETS_ADMIN_PORT=2020 \
+            node bin/deployer.mjs > /tmp/admin-deployer.log 2>&1 &
+          ADMIN_PID=$!
+          for i in $(seq 1 15); do
+            curl -s -o /dev/null http://127.0.0.1:2020/ && break; sleep 1
+          done
+          TOKEN="$(cat ~/.config/docklets/admin-token)"
+          fail() { echo "::error::$1"; cat /tmp/admin-deployer.log; kill $ADMIN_PID; exit 1; }
+
+          # UI served without auth, API refused without token
+          curl -sf http://127.0.0.1:2020/ | grep -q "docklets admin" || fail "admin UI missing"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:2020/api/status)" = "401" ] || fail "unauthenticated status not 401"
+          # DNS-rebinding defense: foreign Host header refused
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example:2020' http://127.0.0.1:2020/api/status)" = "403" ] || fail "foreign Host not 403"
+          # no CORS grants
+          curl -s -D - -o /dev/null -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2020/api/status | grep -qi 'access-control-allow' && fail "CORS header present" || true
+          # authenticated status
+          curl -sf -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2020/api/status | grep -q '"guestbook"' || fail "authed status missing app"
+          # unknown slug 404, tail cap accepted
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2020/api/logs/nope)" = "404" ] || fail "unknown slug not 404"
+          curl -sf -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:2020/api/logs/guestbook?tail=99999" | grep -q '"logs"' || fail "logs endpoint failed"
+          # pause removes the container on converge; resume restores it
+          curl -sf -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2020/api/pause/guestbook | grep -q '"ok":true' || fail "pause failed"
+          for i in $(seq 1 20); do
+            docker ps --format '{{.Names}}' | grep -q '^dk-ci-guestbook$' || break; sleep 1
+          done
+          docker ps --format '{{.Names}}' | grep -q '^dk-ci-guestbook$' && fail "paused app still running"
+          for i in $(seq 1 10); do
+            grep -q '"state": "paused"' "$TESTROOT/.status.json" && break; sleep 1
+          done
+          grep -q '"state": "paused"' "$TESTROOT/.status.json" || fail "paused state not in status feed"
+          curl -sf -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:2020/api/resume/guestbook | grep -q '"ok":true' || fail "resume failed"
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:8081/guestbook/api/messages && break; sleep 2
+          done
+          curl -sf http://127.0.0.1:8081/guestbook/api/messages | grep -q '"text":"ci"' || fail "data lost across pause/resume"
+          kill $ADMIN_PID
       - name: Verify removal lifecycle
         run: |
           rm "$TESTROOT/guestbook/app.json"

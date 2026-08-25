@@ -1,0 +1,86 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docklets admin</title>
+<style>
+  :root{color-scheme:light dark;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--mut:#6b7684;--line:#8884}
+  body{font-family:-apple-system,system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem}
+  h1{font-size:1.3rem;display:flex;gap:.5rem;align-items:center}
+  .banner{font-size:.8rem;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;margin:.6rem 0}
+  #lock input{width:60%;padding:.5rem;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit}
+  button{padding:.4rem .7rem;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;cursor:pointer}
+  button:hover{border-color:#3b82f6}
+  .card{border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;margin:.5rem 0;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+  .slug{font-weight:600;min-width:9rem}
+  .badge{font-size:.75rem;padding:.1rem .5rem;border-radius:99px;border:1px solid var(--line)}
+  .running{color:var(--ok)} .exited{color:var(--bad)} .paused{color:var(--warn)} .starting{color:var(--warn)}
+  .meta{color:var(--mut);font-size:.8rem;flex:1}
+  pre{background:#8881;border-radius:8px;padding:.7rem;font-size:.75rem;overflow-x:auto;max-height:320px;white-space:pre-wrap}
+  .statics{color:var(--mut);font-size:.85rem}
+  #err{color:var(--bad);font-size:.85rem}
+</style>
+<h1>&#128736;&#65039; docklets admin</h1>
+<div class="banner">Local admin plane. This page is served only from 127.0.0.1 and is the ONLY place
+your admin token belongs. Never enter the token on any site served from the public gateway.</div>
+<div id="lock">
+  <p>Token (from <code>~/.config/docklets/admin-token</code>):</p>
+  <input id="tok" type="password" placeholder="dkadm_...">
+  <button onclick="unlock()">Unlock</button>
+</div>
+<div id="err"></div>
+<div id="main" hidden>
+  <div id="apps"></div>
+  <p class="statics" id="statics"></p>
+  <pre id="logs" hidden></pre>
+</div>
+<script>
+  let token = sessionStorage.getItem('dk-admin-token') || '';
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t).replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+  async function api(path, opts = {}) {
+    const r = await fetch(path, { ...opts, cache: 'no-store',
+      headers: { Authorization: 'Bearer ' + token } });
+    if (r.status === 401) { relock('Unauthorized: check the token.'); throw new Error('401'); }
+    return r.json();
+  }
+  function relock(msg) {
+    sessionStorage.removeItem('dk-admin-token'); token = '';
+    $('main').hidden = true; $('lock').hidden = false; $('err').textContent = msg || '';
+  }
+  function unlock() {
+    token = $('tok').value.trim();
+    sessionStorage.setItem('dk-admin-token', token);
+    $('tok').value = '';
+    refresh();
+  }
+  async function act(action, slug) {
+    try { await api(`/api/${action}/${slug}`, { method: 'POST' }); } catch {}
+    setTimeout(refresh, 300);
+  }
+  async function showLogs(slug) {
+    const r = await api(`/api/logs/${slug}?tail=200`);
+    $('logs').hidden = false;
+    $('logs').textContent = `docker logs ${slug} (tail 200)\n\n` + (r.logs || r.error || '');
+  }
+  async function refresh() {
+    try {
+      const s = await api('/api/status');
+      $('lock').hidden = true; $('main').hidden = false; $('err').textContent = '';
+      $('apps').innerHTML = s.apps.map((a) => `
+        <div class="card">
+          <span class="slug">${esc(a.slug)}</span>
+          <span class="badge ${esc(a.state)}">${esc(a.state)}</span>
+          <span class="meta">${esc(a.runtime || '')} ${a.port ? ':' + esc(a.port) : ''} ${esc(a.statusText || '')} ${a.hash ? '&#183; ' + esc(a.hash) : ''}</span>
+          ${a.state === 'paused'
+            ? `<button onclick="act('resume','${esc(a.slug)}')">Resume</button>`
+            : `<button onclick="act('restart','${esc(a.slug)}')">Restart</button>
+               <button onclick="act('pause','${esc(a.slug)}')">Pause</button>`}
+          <button onclick="showLogs('${esc(a.slug)}')">Logs</button>
+        </div>`).join('') || '<p class="statics">No dynamic apps deployed.</p>';
+      $('statics').textContent = s.static.length ? 'Static sites: ' + s.static.join(', ') : '';
+    } catch (e) { if (String(e.message) !== '401') $('err').textContent = 'Deployer unreachable.'; }
+  }
+  if (token) refresh();
+  setInterval(() => { if (token) refresh(); }, 5000);
+</script>
