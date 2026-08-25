@@ -45,6 +45,16 @@ cat > "$AGENTS/$1.plist" <<EOF
 EOF
 }
 
+# Drop publishing instructions into the asset root so any coding agent opened
+# there (Codex, Claude Code, Cursor, and other AGENTS.md-aware tools) knows how
+# to publish without setup. CLAUDE.md is a symlink for harnesses that read that
+# name. Both are hidden from public serving by the gateway. Never overwrite.
+if [ ! -e "$ROOT/AGENTS.md" ]; then
+  sed -e "s|<ASSETS>|$ROOT|g" -e "s|<HOST>|http://localhost:$PORT|g" \
+    "$REPO/AGENTS.md" | grep -v '^>' > "$ROOT/AGENTS.md"
+fi
+[ -e "$ROOT/CLAUDE.md" ] || ln -s AGENTS.md "$ROOT/CLAUDE.md"
+
 # Deploy the read-only status dashboard so the root redirect (/ -> /status/)
 # always has a target. Never overwrite a dashboard the operator customized.
 if [ ! -e "$ROOT/status" ]; then
