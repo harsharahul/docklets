@@ -62,12 +62,28 @@ jobs:
           }
       - name: Verify docklet API round-trip and persistence
         run: |
-          for i in $(seq 1 15); do
-            curl -sf -o /dev/null http://127.0.0.1:8081/guestbook/ && break; sleep 2
+          # Wait on the API path: a file-server listing can never answer this,
+          # so success proves the proxy route AND the app process are live.
+          for i in $(seq 1 20); do
+            curl -sf -o /dev/null http://127.0.0.1:8081/guestbook/api/messages && break
+            sleep 2
           done
-          curl -sf -X POST http://127.0.0.1:8081/guestbook/api/messages \
-            -H 'content-type: application/json' -d '{"text":"ci"}' | grep -q '"ok":true'
-          curl -sf http://127.0.0.1:8081/guestbook/api/messages | grep -q '"text":"ci"'
+          curl -sf -o /dev/null http://127.0.0.1:8081/guestbook/api/messages || {
+            echo "::error::guestbook app never became reachable"
+            docker ps -a
+            docker logs dk-ci-guestbook 2>&1 | tail -20
+            docker logs dk-ci-gw 2>&1 | tail -20
+            exit 1
+          }
+          POST="$(curl -sf -X POST http://127.0.0.1:8081/guestbook/api/messages \
+            -H 'content-type: application/json' -d '{"text":"ci"}')"
+          echo "POST response: $POST"
+          echo "$POST" | grep -q '"ok":true'
+          GET="$(curl -sf http://127.0.0.1:8081/guestbook/api/messages)"
+          echo "GET response: $GET"
+          echo "$GET" | grep -q '"text":"ci"'
+          echo "on-disk state:"
+          cat "$TESTROOT/.data/guestbook/messages.json"
           grep -q '"text": "ci"' "$TESTROOT/.data/guestbook/messages.json"
       - name: Verify app container hardening
         run: |
