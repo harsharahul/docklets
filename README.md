@@ -245,7 +245,7 @@ tail -f <root>/.gateway/logs/deployer.log
 ## Roadmap
 
 - Per-app egress policy (offline-by-default apps, allowlisted hosts)
-- Per-app non-root user and read-only app rootfs once dependency install moves to a build step
+- Read-only app rootfs once dependency install moves to a build step
 - More runtimes (bun, deno, static binaries)
 - Optional basic-auth / OIDC on the gateway
 - Subdomain-per-app mode (origin isolation between apps)

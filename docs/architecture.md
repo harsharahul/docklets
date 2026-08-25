@@ -72,6 +72,8 @@ One per docklet, named `<prefix><slug>` (default `docklet-<slug>`):
 | `/data` | `<root>/.data/<slug>`, read-write, survives everything |
 | network | internal docker network only; no published ports |
 | restart | `unless-stopped` (crash recovery without the deployer) |
+| user | the deployer's uid:gid, never container root |
+| `/app`, `/tmp` | per-container tmpfs (world-writable mode, vanish with the container) |
 | hardening | `cap-drop ALL`, `no-new-privileges`, `--init`, memory and pid caps |
 
 Start sequence: copy `/src` to `/app`, optionally run the runtime's dependency
