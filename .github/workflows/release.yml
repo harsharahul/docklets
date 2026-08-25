@@ -9,7 +9,7 @@ jobs:
     name: Verify release tag matches package version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tag must equal package.json version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
