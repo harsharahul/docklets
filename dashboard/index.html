@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>docklets</title>
+<style>
+  :root{color-scheme:light dark;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--mut:#6b7684;--line:#8884}
+  body{font-family:-apple-system,system-ui,sans-serif;max-width:720px;margin:2.5rem auto;padding:0 1rem}
+  h1{font-size:1.4rem}
+  .banner{font-size:.78rem;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:.5rem .7rem;margin:.7rem 0}
+  .card{border:1px solid var(--line);border-radius:10px;padding:.65rem .9rem;margin:.45rem 0;display:flex;gap:.6rem;align-items:center}
+  .slug{font-weight:600;flex:1}
+  a{color:inherit}
+  .badge{font-size:.75rem;padding:.1rem .55rem;border-radius:99px;border:1px solid var(--line)}
+  .running{color:var(--ok)} .exited{color:var(--bad)} .paused,.starting{color:var(--warn)}
+  h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:1.3rem 0 .3rem}
+  .mut{color:var(--mut);font-size:.85rem}
+  code{background:#8881;padding:.1em .4em;border-radius:4px;font-size:.85em}
+  footer{margin-top:1.6rem;font-size:.78rem;color:var(--mut);line-height:1.7}
+</style>
+</head>
+<body>
+<h1>&#128230; docklets</h1>
+<div class="banner">Read-only status view. This page never asks for a token or password;
+anything that does is not this dashboard. Deploys and removals are file operations in the asset root.</div>
+<div id="state" class="mut">loading&hellip;</div>
+<div id="apps"></div>
+<div id="statics"></div>
+<footer>
+  Deploy an app: write <code>&lt;slug&gt;/app.json</code> + code &#183;
+  Stop: delete <code>app.json</code> &#183;
+  Unpublish: delete the folder &#183;
+  Logs: <code>docker logs docklet-&lt;slug&gt;</code> (on the host)
+</footer>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (t) => String(t).replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+  async function refresh() {
+    try {
+      const r = await fetch('../.status.json', { cache: 'no-store' });
+      if (!r.ok) throw 0;
+      const s = await r.json();
+      $('state').textContent = 'updated ' + new Date(s.generatedAt).toLocaleTimeString();
+      $('apps').innerHTML = '<h2>Apps</h2>' + (s.apps.length ? s.apps.map((a) => `
+        <div class="card">
+          <span class="slug"><a href="../${esc(a.slug)}/">/${esc(a.slug)}/</a></span>
+          <span class="badge ${esc(a.state)}">${esc(a.state)}</span>
+        </div>`).join('') : '<p class="mut">none</p>');
+      $('statics').innerHTML = '<h2>Static sites</h2>' + (s.static.length ? s.static.map((n) => `
+        <div class="card"><span class="slug"><a href="../${esc(n)}/">/${esc(n)}/</a></span>
+        <span class="badge">static</span></div>`).join('') : '<p class="mut">none</p>');
+    } catch {
+      $('state').textContent = 'status feed unavailable (is the deployer running?)';
+    }
+  }
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>

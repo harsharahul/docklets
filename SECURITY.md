@@ -66,6 +66,36 @@ The deployer validates before running anything: slug must match
 `port` must be 1-65535, env keys must be `[A-Za-z_][A-Za-z0-9_]*`, and
 symlinked manifests are ignored. Unknown runtimes are skipped, never guessed.
 
+## Admin plane
+
+Off by default. When enabled (`DOCKLETS_ADMIN_PORT`), a daemon inside the
+deployer serves a token-authenticated UI and API on `127.0.0.1` only. It is
+designed against these attackers: deployed apps (which can reach host
+loopback through `host.docker.internal`), agents (which write the asset
+root), and hostile pages in the operator's browser.
+
+| Attack | Defense |
+|---|---|
+| App or agent reads the token | Token at `~/.config/docklets/admin-token` (0600), outside the asset root; never in env or argv; generated once, atomically |
+| Shared-origin JS steals the token | Admin UI is served from its own origin (`127.0.0.1:<port>`), never from the public gateway |
+| DNS rebinding | Strict Host-header allowlist; foreign hosts get 403 |
+| CSRF / cross-origin calls | No cookies at all; bearer header forces a preflight; zero CORS headers are ever sent |
+| Container brute-forces the token | 32 random bytes, constant-time comparison; failures logged (rate-limited); deliberately no lockout, which would let an app deny the operator service |
+| Injection via slug parameters | Slug pattern validation plus existence check; all docker invocations are argument arrays, never shells |
+| Token file unreadable | Fails closed: every request 503s; the converge loop keeps running |
+| Reverse proxy exposes the port | Binds loopback only; do not proxy the admin port. Remote administration means reaching the machine over your own VPN or tailnet |
+
+The action set is lifecycle-only (restart, pause, resume, log tail). Pause and
+resume are filesystem operations (`app.json` renamed to `app.json.paused` and
+back) that the converge loop applies. There is no deploy, delete, or
+config-change endpoint.
+
+Residual risks, stated plainly: an operator can be phished into pasting the
+token into a lookalike page (the real UI exists only at `127.0.0.1:<port>`,
+and the public dashboard states it never asks for a token); and any process
+already running as the operator's user can read the token file, which is the
+same class of compromise as reading any other credential on the machine.
+
 ## Known limitations
 
 1. **Apps have outbound internet.** Needed for `npm install` and for apps that
