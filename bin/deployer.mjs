@@ -64,7 +64,7 @@ const RUNTIMES = {
   },
   python: {
     image: 'python:3.12-alpine',
-    install: '[ -f requirements.txt ] && pip install --no-cache-dir -r requirements.txt; ',
+    install: '[ -f requirements.txt ] && pip install --no-cache-dir --target /app/.deps -r requirements.txt; ',
     run: (entry) => `exec python3 ${JSON.stringify(entry)}`,
   },
 };
@@ -148,7 +148,19 @@ function startApp(slug, app) {
   const installStep = app.install ? rt.install : '';
   const cmd = `cp -R /src/. /app && cd /app && ${installStep}${rt.run(app.entry)}`;
   const envArgs = Object.entries(app.env).flatMap(([k, v]) => ['-e', `${k}=${String(v)}`]);
+  // Run as the deployer's own uid/gid, not container root: /data (created by
+  // this process) stays writable without CAP_DAC_OVERRIDE, and app code never
+  // executes with root privileges inside the container. /app and /tmp are
+  // per-container tmpfs so the copy step and package managers work as that
+  // user; both vanish with the container.
+  const uid = `${process.getuid()}:${process.getgid()}`;
   docker(['run', '-d', '--name', name,
+    '--user', uid,
+    '--tmpfs', '/app:rw,mode=1777',
+    '--tmpfs', '/tmp:rw,mode=1777',
+    '-e', 'HOME=/tmp',
+    '-e', 'PYTHONPATH=/app/.deps',
+    '-e', 'npm_config_cache=/tmp/.npm',
     '--label', 'docklet=' + slug,
     '--label', 'docklet-root=' + ROOT,
     '--label', 'docklet-hash=' + app.hash,

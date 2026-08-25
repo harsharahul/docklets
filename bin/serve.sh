@@ -9,6 +9,8 @@
 #   DOCKLETS_PORT      published gateway port   (default: 8080)
 #   DOCKLETS_NETWORK   internal docker network  (default: docklets-net)
 #   DOCKLETS_GATEWAY   gateway container name   (default: docklets-gateway)
+#   DOCKLETS_DETACH    "1" runs the container detached and exits (for CI and
+#                      environments that reap a step's attached processes)
 set -euo pipefail
 
 ROOT="$(cd "${DOCKLETS_ROOT:-$PWD}" && pwd)"
@@ -25,19 +27,27 @@ mkdir -p "$ROOT/.gateway/routes" "$ROOT/.data"
 docker network create "$NET" >/dev/null 2>&1 || true
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
-exec docker run --rm --name "$NAME" \
-  --network "$NET" \
-  -p "$PORT:8080" \
-  -v "$ROOT":/srv:ro \
-  -v "$CADDYFILE":/etc/caddy/Caddyfile:ro \
-  -v "$ROOT/.gateway/routes":/etc/caddy/routes:ro \
-  --read-only \
-  --tmpfs /tmp \
-  --tmpfs /data \
-  --tmpfs /config \
-  --cap-drop ALL \
-  --cap-add NET_BIND_SERVICE \
-  --security-opt no-new-privileges \
-  --pids-limit 128 \
-  --memory 256m \
+GW_ARGS=(
+  --rm --name "$NAME"
+  --network "$NET"
+  -p "$PORT:8080"
+  -v "$ROOT":/srv:ro
+  -v "$CADDYFILE":/etc/caddy/Caddyfile:ro
+  -v "$ROOT/.gateway/routes":/etc/caddy/routes:ro
+  --read-only
+  --tmpfs /tmp
+  --tmpfs /data
+  --tmpfs /config
+  --cap-drop ALL
+  --cap-add NET_BIND_SERVICE
+  --security-opt no-new-privileges
+  --pids-limit 128
+  --memory 256m
   caddy:2.11-alpine
+)
+
+if [ "${DOCKLETS_DETACH:-0}" = "1" ]; then
+  docker run -d "${GW_ARGS[@]}"
+else
+  exec docker run "${GW_ARGS[@]}"
+fi

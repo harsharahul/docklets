@@ -25,7 +25,8 @@ your agent framework already has.
                        agent's strongest move is deploying an app, which
                        lands in boundary 2.
 
-2. APP SANDBOX         per docklet: cap-drop ALL · no-new-privileges ·
+2. APP SANDBOX         per docklet: runs as the deployer's uid, not root ·
+                       cap-drop ALL · no-new-privileges ·
                        memory & pid caps · --init · code read-only at /src ·
                        writable ONLY its own /data · NO published ports ·
                        reachable only via the gateway's internal network.
@@ -76,11 +77,12 @@ symlinked manifests are ignored. Unknown runtimes are skipped, never guessed.
    visitor's browser. Host-side isolation is unaffected. If you serve
    untrusted users next to sensitive apps, use separate roots today or the
    subdomain mode on the roadmap.
-3. **Processes run as container root.** Capability-dropped,
-   no-new-privileges, no host mounts, but container root nonetheless, so a
-   container-escape-class kernel/runtime vulnerability is the remaining
-   escalation path. Moving to per-app non-root users is on the roadmap (it
-   requires separating dependency install from runtime).
+3. **All apps run as the same non-root user.** App processes run as the
+   deployer's uid (never container root), which removes root-in-container
+   from the attack surface. The uid is shared across apps, so isolation
+   between apps rests on the container boundary and per-app mounts, not on
+   distinct users. A container-escape-class kernel/runtime vulnerability
+   remains the escalation path out of the sandbox.
 4. **No auth on the gateway.** Everything served is public to whoever can
    reach the port. Gate it at your reverse proxy, or keep it LAN/tailnet-only.
 5. **The deployer trusts its own code.** It runs `docker` on the host. Protect
