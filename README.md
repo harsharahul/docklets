@@ -221,7 +221,10 @@ containers.
 **Status dashboard** (read-only, public): the deployer writes a minimal
 `.status.json` into the asset root each pass (slug and coarse run state only:
 no ports, paths, or hashes). The bundled dashboard renders it and is itself
-just a static asset:
+just a static asset. The installers deploy it to `/status/` automatically, and
+the gateway root (`/`) redirects there, so hitting the site shows a curated
+status view rather than a raw file listing of every slug. To deploy or
+refresh it manually:
 
 ```bash
 cp -R dashboard <asset-root>/status     # live at /status/

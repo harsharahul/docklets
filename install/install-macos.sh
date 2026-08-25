@@ -45,6 +45,12 @@ cat > "$AGENTS/$1.plist" <<EOF
 EOF
 }
 
+# Deploy the read-only status dashboard so the root redirect (/ -> /status/)
+# always has a target. Never overwrite a dashboard the operator customized.
+if [ ! -e "$ROOT/status" ]; then
+  cp -R "$REPO/dashboard" "$ROOT/status"
+fi
+
 plist com.docklets.gateway  "<string>/bin/bash</string><string>$REPO/bin/serve.sh</string>" gateway
 plist com.docklets.deployer "<string>$NODE_BIN</string><string>$REPO/bin/deployer.mjs</string>" deployer
 

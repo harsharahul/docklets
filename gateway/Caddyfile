@@ -21,8 +21,15 @@ http://:8080 {
 	# matched requests, so proxied slugs never fall through to file_server.
 	import /etc/caddy/routes/*.caddy
 
-	file_server browse {
-		hide .gateway .data .git .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
+	# The bare root redirects to the status dashboard instead of listing every
+	# slug. Individual routes still resolve; there is no public file index. The
+	# installers deploy the dashboard to /status/ so this target always exists.
+	@root path /
+	redir @root /status/ 302
+
+	# No `browse`: a directory without index.html 404s instead of listing files.
+	file_server {
+		hide .gateway .data .git admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
 	}
 
 	header {

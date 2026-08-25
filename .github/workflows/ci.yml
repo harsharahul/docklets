@@ -116,6 +116,20 @@ jobs:
           sleep 1
           curl -sf http://127.0.0.1:8081/status/ | grep -q "docklets"
           curl -sf http://127.0.0.1:8081/.status.json | grep -q '"guestbook"'
+          # root redirects to the dashboard, not a file listing. The target is
+          # in the Location header (curl -w redirect_url), not the empty body.
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/)" = "302" ] \
+            || { echo "::error::root is not a redirect"; exit 1; }
+          LOC="$(curl -s -o /dev/null -w '%{redirect_url}' http://127.0.0.1:8081/)"
+          echo "root Location: $LOC"
+          case "$LOC" in */status/) ;; *) echo "::error::root does not point at /status/ (got $LOC)"; exit 1;; esac
+          # following the redirect must land on the dashboard, and the redirect
+          # body itself must not enumerate slugs
+          curl -sL http://127.0.0.1:8081/ | grep -q "docklets" \
+            || { echo "::error::followed root is not the dashboard"; exit 1; }
+          if curl -s http://127.0.0.1:8081/ | grep -q 'guestbook'; then
+            echo "::error::root still lists slugs"; exit 1
+          fi
       - name: Verify admin plane security properties
         run: |
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
