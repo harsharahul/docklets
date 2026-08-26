@@ -290,6 +290,9 @@ tail -f <root>/.gateway/logs/deployer.log
 
 ## Roadmap
 
+- Tunneled public ingress: an optional connector that gives a self-hosted
+  asset root a public URL, while files, containers, and data stay on your
+  machine
 - Per-app egress policy (offline-by-default apps, allowlisted hosts)
 - Read-only app rootfs once dependency install moves to a build step
 - More runtimes (bun, deno, static binaries)
