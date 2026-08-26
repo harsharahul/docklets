@@ -271,6 +271,10 @@ admin plane, verifies the pinned frp binary by sha256, and keeps its ingress
 token outside the asset root where agents and apps can never reach it. Setup
 and security details: [docs/tunnel.md](docs/tunnel.md).
 
+The server half ships too: `edge/` runs as a single hardened container on any
+VPS (`docker compose up`) or as sharded deployments on Kubernetes, with the
+same configuration at every size. See [docs/edge.md](docs/edge.md).
+
 ## Security model
 
 Read [SECURITY.md](SECURITY.md) for the full threat model, verified boundary

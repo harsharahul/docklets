@@ -8,3 +8,4 @@ PLAN.md
 *.local.md
 .claude/
 .playwright-mcp/
+edge/frps.toml

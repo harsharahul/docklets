@@ -179,34 +179,40 @@ jobs:
           done
           curl -sf http://127.0.0.1:8081/guestbook/api/messages | grep -q '"text":"ci"' || fail "data lost across pause/resume"
           kill $ADMIN_PID
-      - name: Verify tunnel connector end to end
+      - name: Verify tunnel connector end to end against the shipped edge
         run: |
           T="$(mktemp -d)"
-          # local test edge: frps from the SAME pinned release, checksum-verified
-          curl -fsSL -o "$T/frp.tar.gz" \
-            "https://github.com/fatedier/frp/releases/download/v0.71.0/frp_0.71.0_linux_amd64.tar.gz"
-          echo "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716  $T/frp.tar.gz" | sha256sum -c -
-          tar -xzf "$T/frp.tar.gz" -C "$T" "frp_0.71.0_linux_amd64/frps"
-          printf 'bindPort = 7401\nvhostHTTPPort = 8402\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > "$T/frps.toml"
-          "$T/frp_0.71.0_linux_amd64/frps" -c "$T/frps.toml" > "$T/frps.log" 2>&1 &
-          sleep 2
+          # the REAL edge artifact: build edge/Dockerfile and run it
+          docker build -q -t docklets-edge-ci edge/
+          printf 'bindPort = 7000\nvhostHTTPPort = 8080\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > "$T/frps.toml"
+          docker run -d --name dk-ci-edge --network host \
+            -v "$T/frps.toml":/etc/frps/frps.toml:ro docklets-edge-ci
+          for i in $(seq 1 15); do
+            (echo > /dev/tcp/127.0.0.1/7000) 2>/dev/null && break; sleep 1
+          done
           # guard: refuses to tunnel the admin plane
           mkdir -p "$T/conf"
-          printf 'TUNNEL_SERVER=127.0.0.1\nTUNNEL_PORT=7401\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-tenant\nLOCAL_PORT=2020\n' > "$T/conf/bad.env"
+          printf 'TUNNEL_SERVER=127.0.0.1\nTUNNEL_PORT=7000\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-tenant\nLOCAL_PORT=2020\n' > "$T/conf/bad.env"
           if DOCKLETS_CONNECTOR_CONFIG="$T/conf/bad.env" DOCKLETS_CONNECTOR_HOME="$T/conf" ./bin/connector.sh 2>/dev/null; then
             echo "::error::connector tunneled the admin port"; exit 1
           fi
           # real tunnel to the smoke-test gateway on :8081
-          printf 'TUNNEL_SERVER=127.0.0.1\nTUNNEL_PORT=7401\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-tenant\nLOCAL_PORT=8081\n' > "$T/conf/good.env"
+          printf 'TUNNEL_SERVER=127.0.0.1\nTUNNEL_PORT=7000\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-tenant\nLOCAL_PORT=8081\n' > "$T/conf/good.env"
           DOCKLETS_CONNECTOR_CONFIG="$T/conf/good.env" DOCKLETS_CONNECTOR_HOME="$T/conf" ./bin/connector.sh > "$T/connector.log" 2>&1 &
           for i in $(seq 1 20); do grep -q "start proxy success" "$T/connector.log" && break; sleep 1; done
           grep -q "start proxy success" "$T/connector.log" || { echo "::error::tunnel never established"; cat "$T/connector.log"; exit 1; }
-          curl -sf -H "Host: ci-tenant.docklets.test" http://127.0.0.1:8402/hello-static/ | grep -q "It works" \
+          curl -sf -H "Host: ci-tenant.docklets.test" http://127.0.0.1:8080/hello-static/ | grep -q "It works" \
             || { echo "::error::static asset not served through tunnel"; exit 1; }
-          curl -sf -H "Host: ci-tenant.docklets.test" http://127.0.0.1:8402/guestbook/api/messages > /dev/null \
+          curl -sf -H "Host: ci-tenant.docklets.test" http://127.0.0.1:8080/guestbook/api/messages > /dev/null \
             || { echo "::error::docklet API not served through tunnel"; exit 1; }
-          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: nobody.docklets.test' http://127.0.0.1:8402/)" = "404" ] \
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: nobody.docklets.test' http://127.0.0.1:8080/)" = "404" ] \
             || { echo "::error::unknown tenant not 404"; exit 1; }
+          docker rm -f dk-ci-edge
+      - name: Validate edge deployment manifests
+        run: |
+          docker compose -f edge/docker-compose.yml config -q
+          pip install -q pyyaml 2>/dev/null || pip3 install -q pyyaml
+          python3 -c "import yaml,sys; list(yaml.safe_load_all(open('edge/k8s/edge.yaml'))); print('edge k8s yaml valid')"
       - name: Verify removal lifecycle
         run: |
           rm "$TESTROOT/guestbook/app.json"

@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Tunnel edge (`edge/`): the server half of the tunnel, deployable as a
+  single hardened container (`edge/Dockerfile` + compose file, upstream frp
+  pinned by sha256 at build, runs as nobody with capabilities dropped) or on
+  Kubernetes (`edge/k8s/edge.yaml`, single-replica shards that scale by
+  adding shards). CI builds the image and runs the tunnel round-trip against
+  it, and validates the compose and Kubernetes manifests. Documented in
+  `docs/edge.md`.
 - Tunnel connector (`bin/connector.sh`): exposes a self-hosted asset root
   through any frp-compatible edge while files, containers, and data stay
   local. Dials out only, refuses to tunnel the admin plane, pins the frp
