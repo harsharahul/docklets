@@ -59,6 +59,16 @@ The admin plane is a token-authenticated local daemon for lifecycle actions
    reachable remotely; remote administration means reaching the machine over
    the operator's own VPN or tailnet first.
 
+## 3b. Public URL via tunnel (optional)
+
+`bin/connector.sh` connects the asset root to any frp-compatible edge server
+for a public URL while everything stays local. First run writes
+`~/.config/docklets/connector.env`; fill in the edge host, token, and
+subdomain, then run it under a service manager. It refuses to tunnel the
+admin plane. Details: `docs/tunnel.md`. As with the admin token, tell the
+user where the config lives; do not read the tunnel token into the
+conversation.
+
 ## 4. Publish content
 
 Follow the repository's `AGENTS.md` for the publishing rules (slug naming,
