@@ -262,6 +262,15 @@ dashboard, admin plane, and wiring `AGENTS.md` into the agent's own
 instructions. Point your agent at the file, or copy it into your skills
 directory.
 
+## Public URL without the cloud: the tunnel connector
+
+`bin/connector.sh` connects your asset root to any frp-compatible tunnel edge:
+you get a public URL while files, containers, and data stay on your machine.
+It dials out (NAT and CGNAT friendly, no inbound ports), refuses to tunnel the
+admin plane, verifies the pinned frp binary by sha256, and keeps its ingress
+token outside the asset root where agents and apps can never reach it. Setup
+and security details: [docs/tunnel.md](docs/tunnel.md).
+
 ## Security model
 
 Read [SECURITY.md](SECURITY.md) for the full threat model, verified boundary
@@ -290,9 +299,8 @@ tail -f <root>/.gateway/logs/deployer.log
 
 ## Roadmap
 
-- Tunneled public ingress: an optional connector that gives a self-hosted
-  asset root a public URL, while files, containers, and data stay on your
-  machine
+- A managed tunnel edge, so the connector works without bringing your own
+  server
 - Per-app egress policy (offline-by-default apps, allowlisted hosts)
 - Read-only app rootfs once dependency install moves to a build step
 - More runtimes (bun, deno, static binaries)

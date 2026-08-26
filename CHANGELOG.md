@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Tunnel connector (`bin/connector.sh`): exposes a self-hosted asset root
+  through any frp-compatible edge while files, containers, and data stay
+  local. Dials out only, refuses to tunnel the admin plane, pins the frp
+  client by version and per-platform sha256, keeps the ingress token outside
+  the asset root, and reconnects automatically. Documented in
+  `docs/tunnel.md`; CI runs a full tunnel round-trip (static asset and
+  docklet API through a local edge, admin-port refusal, unknown-tenant 404).
+
 ## [0.3.0] - 2026-08-25
 
 ### Added
