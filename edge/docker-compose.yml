@@ -1,0 +1,18 @@
+# docklets edge, single-server flavor. Smallest possible deployment:
+#   cp frps.toml.example frps.toml   (edit it)
+#   docker compose up -d
+# Front the vhost port with any TLS proxy (Caddy with a wildcard certificate
+# is the usual choice); point *.your-domain at this host.
+services:
+  edge:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "7000:7000"     # tunnel-in (connectors)
+      - "8080:8080"     # public HTTP (put your TLS proxy in front)
+    volumes:
+      - ./frps.toml:/etc/frps/frps.toml:ro
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    pids_limit: 128

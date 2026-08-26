@@ -1,0 +1,113 @@
+# docklets edge on Kubernetes (k3s, k8s, anything conformant).
+#
+# The same edge as edge/docker-compose.yml, wrapped for a cluster. One frps
+# shard per Deployment. A tunnel is a sticky TCP connection, so horizontal
+# scale means MORE SHARD DEPLOYMENTS with connectors assigned per shard, not
+# replicas of one shard: replicas stays 1 here.
+#
+# Before applying, create the auth secret (never commit a real token):
+#   kubectl -n docklets-edge create secret generic frps-auth \
+#     --from-literal=token="$(openssl rand -hex 24)"
+#
+# Then point *.your-domain at your ingress and forward it, Host header
+# preserved, to the frps-vhost Service. TLS terminates wherever it already
+# does in your stack (ingress controller, external proxy, or a CDN).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: docklets-edge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frps-config
+  namespace: docklets-edge
+data:
+  frps.toml: |
+    bindPort = 7000
+    vhostHTTPPort = 8080
+    subdomainHost = "example.com"    # CHANGE: the domain whose subdomains are tenants
+    auth.method = "token"
+    auth.token = "__FRPS_TOKEN__"    # substituted from the secret at start
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frps-shard-1
+  namespace: docklets-edge
+spec:
+  replicas: 1            # sticky tunnels: add shards to scale, keep replicas 1
+  selector:
+    matchLabels: { app: frps-shard-1 }
+  template:
+    metadata:
+      labels: { app: frps-shard-1 }
+    spec:
+      containers:
+        - name: frps
+          # Upstream release binary, fetched and sha256-verified at start on a
+          # plain alpine base, so no third-party frp image enters the chain.
+          # If you build and push edge/Dockerfile to your own registry, swap
+          # this for your image and drop the download block.
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              VER=0.71.0
+              SHA=84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716
+              ARCH=amd64
+              if [ "$(uname -m)" = "aarch64" ]; then
+                SHA=f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266
+                ARCH=arm64
+              fi
+              apk add --no-cache curl >/dev/null
+              curl -fsSL -o /tmp/frp.tgz "https://github.com/fatedier/frp/releases/download/v${VER}/frp_${VER}_linux_${ARCH}.tar.gz"
+              echo "$SHA  /tmp/frp.tgz" | sha256sum -c -
+              tar -xzf /tmp/frp.tgz -C /tmp "frp_${VER}_linux_${ARCH}/frps"
+              sed "s|__FRPS_TOKEN__|${FRPS_TOKEN}|" /config/frps.toml > /tmp/frps.toml
+              exec "/tmp/frp_${VER}_linux_${ARCH}/frps" -c /tmp/frps.toml
+          env:
+            - name: FRPS_TOKEN
+              valueFrom:
+                secretKeyRef: { name: frps-auth, key: token }
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+          ports:
+            - { name: tunnel, containerPort: 7000 }
+            - { name: vhost, containerPort: 8080 }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: "1", memory: 256Mi }
+          readinessProbe:
+            tcpSocket: { port: 7000 }
+            initialDelaySeconds: 5
+      volumes:
+        - name: config
+          configMap: { name: frps-config }
+---
+# Connectors dial this. Expose it however your cluster exposes TCP: NodePort,
+# LoadBalancer, or keep it LAN-only when connectors share the network.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frps-tunnel
+  namespace: docklets-edge
+spec:
+  type: NodePort
+  selector: { app: frps-shard-1 }
+  ports:
+    - { name: tunnel, port: 7000, targetPort: 7000 }
+---
+# Public HTTP enters here; the Host header selects the tenant. Route your
+# ingress (Host preserved) to this Service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: frps-vhost
+  namespace: docklets-edge
+spec:
+  type: ClusterIP
+  selector: { app: frps-shard-1 }
+  ports:
+    - { name: vhost, port: 8080, targetPort: 8080 }
