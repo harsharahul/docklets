@@ -275,9 +275,9 @@ token outside the asset root where agents and apps can never reach it. With
 works through HTTPS ingresses and CDNs and from networks that only allow
 outbound HTTPS. Setup and security details: [docs/tunnel.md](docs/tunnel.md).
 
-The server half ships too: `edge/` runs as a single hardened container on any
-VPS (`docker compose up`) or as sharded deployments on Kubernetes, with the
-same configuration at every size. See [docs/edge.md](docs/edge.md).
+The connector speaks standard frp, so the server side is any frp server you
+already run or rent: a minimal `frps.toml` for a VPS is in
+[docs/tunnel.md](docs/tunnel.md).
 
 ## Security model
 

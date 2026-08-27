@@ -8,13 +8,6 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Tunnel edge (`edge/`): the server half of the tunnel, deployable as a
-  single hardened container (`edge/Dockerfile` + compose file, upstream frp
-  pinned by sha256 at build, runs as nobody with capabilities dropped) or on
-  Kubernetes (`edge/k8s/edge.yaml`, single-replica shards that scale by
-  adding shards). CI builds the image and runs the tunnel round-trip against
-  it, and validates the compose and Kubernetes manifests. Documented in
-  `docs/edge.md`.
 - Tunnel connector (`bin/connector.sh`): exposes a self-hosted asset root
   through any frp-compatible edge while files, containers, and data stay
   local. Dials out only, refuses to tunnel the admin plane, pins the frp
@@ -26,10 +19,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dials the edge as a TLS websocket, so it enters through HTTPS ingresses,
   reverse proxies, and CDNs, and works from networks that only allow
   outbound HTTPS. wss verifies the edge certificate against the system CA
-  bundle or `TUNNEL_CA_FILE` and refuses to connect unverified. The edge
-  docs gain the matching ingress dial-hostname pattern (`docs/edge.md`); CI
-  covers refusal without trust and a full round-trip through a
-  TLS-terminating proxy.
+  bundle or `TUNNEL_CA_FILE` and refuses to connect unverified. CI covers
+  refusal without trust and a full round-trip through a TLS-terminating
+  proxy.
+- Managed-edge authentication for the connector (`TUNNEL_USER`): the
+  connector can authenticate as an assigned user with a per-tenant token
+  sent as connection metadata, so multi-tenant edges can validate and
+  revoke tenants individually. Classic edge-wide token auth is unchanged
+  and remains the default. CI covers both configuration shapes and a
+  managed-mode round-trip.
 - The installers manage the tunnel connector as a service
   (`com.docklets.connector` on macOS, `docklets-connector.service` on
   Linux) once `~/.config/docklets/connector.env` exists; installs without
