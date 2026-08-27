@@ -96,6 +96,22 @@ and the public dashboard states it never asks for a token); and any process
 already running as the operator's user can read the token file, which is the
 same class of compromise as reading any other credential on the machine.
 
+## Tunnel connector
+
+The connector (`bin/connector.sh`) only ever dials out, and it forwards edge
+traffic to the gateway port alone; tunneling the admin port is refused
+outright, so the admin plane stays local with or without a tunnel. The tunnel
+token is an ingress credential: leaking it lets someone impersonate the
+tunnel's route, never write files or deploy anything. The frp client binary
+is version-pinned and sha256-verified per platform before first use.
+
+Transport security: in the default tcp mode the client-to-edge connection
+runs with TLS enabled. In wss mode (`TUNNEL_PROTOCOL=wss`, for edges behind
+an HTTPS proxy or CDN) the connector verifies the edge certificate against
+the system CA bundle, or against `TUNNEL_CA_FILE` when set, and refuses to
+connect if verification fails. CI asserts both the refusal without trust and
+end-to-end traffic through a TLS-terminating proxy.
+
 ## Known limitations
 
 1. **Apps have outbound internet.** Needed for `npm install` and for apps that

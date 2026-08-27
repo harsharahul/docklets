@@ -23,7 +23,7 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-          shellcheck -S warning bin/serve.sh install/*.sh
+          shellcheck -S warning bin/serve.sh bin/connector.sh install/*.sh
 
   smoke:
     name: End-to-end smoke test
@@ -207,7 +207,48 @@ jobs:
             || { echo "::error::docklet API not served through tunnel"; exit 1; }
           [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: nobody.docklets.test' http://127.0.0.1:8080/)" = "404" ] \
             || { echo "::error::unknown tenant not 404"; exit 1; }
-          docker rm -f dk-ci-edge
+      - name: Verify wss transport through a TLS-terminating proxy
+        run: |
+          T="$(mktemp -d)"; mkdir -p "$T/conf" "$T/wss"
+          # caddy stands in for any TLS-terminating HTTPS proxy in front of frps
+          openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+            -keyout "$T/wss/key.pem" -out "$T/wss/cert.pem" -days 2 -nodes \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+          cat > "$T/wss/Caddyfile" <<'EOF'
+          {
+            auto_https off
+            admin off
+          }
+          :8443 {
+            tls /etc/caddy/cert.pem /etc/caddy/key.pem
+            reverse_proxy 127.0.0.1:7000
+          }
+          EOF
+          chmod -R a+r "$T/wss"
+          docker run -d --name dk-ci-wssproxy --network host \
+            -v "$T/wss:/etc/caddy:ro" caddy:2.11-alpine caddy run --config /etc/caddy/Caddyfile
+          for i in $(seq 1 15); do
+            (echo > /dev/tcp/127.0.0.1/8443) 2>/dev/null && break; sleep 1
+          done
+          # without a CA that trusts the proxy, the connector must refuse
+          printf 'TUNNEL_SERVER=localhost\nTUNNEL_PORT=8443\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-wss\nLOCAL_PORT=8081\nTUNNEL_PROTOCOL=wss\n' > "$T/conf/wss-noca.env"
+          DOCKLETS_CONNECTOR_CONFIG="$T/conf/wss-noca.env" DOCKLETS_CONNECTOR_HOME="$T/conf" ./bin/connector.sh > "$T/wss-noca.log" 2>&1 &
+          NOCA=$!; sleep 10; kill $NOCA 2>/dev/null || true
+          grep -q "certificate signed by unknown authority" "$T/wss-noca.log" \
+            || { echo "::error::expected certificate refusal is missing"; cat "$T/wss-noca.log"; exit 1; }
+          if grep -q "start proxy success" "$T/wss-noca.log"; then
+            echo "::error::wss connected without trust"; exit 1
+          fi
+          # pinning the proxy certificate as CA establishes and carries traffic
+          printf 'TUNNEL_SERVER=localhost\nTUNNEL_PORT=8443\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-wss\nLOCAL_PORT=8081\nTUNNEL_PROTOCOL=wss\n' > "$T/conf/wss.env"
+          echo "TUNNEL_CA_FILE=$T/wss/cert.pem" >> "$T/conf/wss.env"
+          DOCKLETS_CONNECTOR_CONFIG="$T/conf/wss.env" DOCKLETS_CONNECTOR_HOME="$T/conf" ./bin/connector.sh > "$T/wss.log" 2>&1 &
+          for i in $(seq 1 20); do grep -q "start proxy success" "$T/wss.log" && break; sleep 1; done
+          grep -q "start proxy success" "$T/wss.log" \
+            || { echo "::error::wss tunnel never established"; cat "$T/wss.log"; docker logs dk-ci-wssproxy; exit 1; }
+          curl -sf -H "Host: ci-wss.docklets.test" http://127.0.0.1:8080/hello-static/ | grep -q "It works" \
+            || { echo "::error::static asset not served through wss tunnel"; exit 1; }
+          docker rm -f dk-ci-wssproxy dk-ci-edge
       - name: Validate edge deployment manifests
         run: |
           docker compose -f edge/docker-compose.yml config -q
