@@ -35,6 +35,30 @@ Edit the `subdomainHost` in the ConfigMap to your domain, expose the
 and route your ingress, Host header preserved, to the `frps-vhost` Service.
 TLS terminates wherever it already does in your stack.
 
+### Dialing through your ingress
+
+Instead of exposing the tunnel port as raw TCP, you can route a dial
+hostname through the same ingress that already fronts the cluster:
+
+```yaml
+# Route a dial hostname to the tunnel port; connectors then use
+# TUNNEL_PROTOCOL=wss with TUNNEL_SERVER=<dial hostname> and TUNNEL_PORT=443.
+- host: tunnel-1.example.com
+  http:
+    paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service: { name: frps-tunnel, port: { number: 7000 } }
+```
+
+Connectors dial it with `TUNNEL_PROTOCOL=wss` (see
+[docs/tunnel.md](tunnel.md)), so the tunnel enters as an ordinary TLS
+websocket and no extra port is opened anywhere. With multiple shards,
+per-shard dial hostnames replace per-shard ports. The TLS terminator in
+front needs websocket upgrade enabled and a read timeout of at least 90
+seconds so tunnel heartbeats keep the connection alive.
+
 ## Scaling: shards, not replicas
 
 A tunnel is a sticky TCP connection between one connector and one frps

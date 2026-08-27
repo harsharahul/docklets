@@ -12,6 +12,11 @@
 # Then point *.your-domain at your ingress and forward it, Host header
 # preserved, to the frps-vhost Service. TLS terminates wherever it already
 # does in your stack (ingress controller, external proxy, or a CDN).
+#
+# Connectors reach the frps-tunnel Service either as raw TCP (NodePort,
+# LoadBalancer, LAN-only) or through your ingress as a websocket dial
+# hostname routed to port 7000, with TUNNEL_PROTOCOL=wss on the connector.
+# See docs/edge.md, "Dialing through your ingress".
 apiVersion: v1
 kind: Namespace
 metadata:

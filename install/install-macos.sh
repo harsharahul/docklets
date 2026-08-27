@@ -64,7 +64,15 @@ fi
 plist com.docklets.gateway  "<string>/bin/bash</string><string>$REPO/bin/serve.sh</string>" gateway
 plist com.docklets.deployer "<string>$NODE_BIN</string><string>$REPO/bin/deployer.mjs</string>" deployer
 
-for svc in com.docklets.gateway com.docklets.deployer; do
+# The tunnel connector is opt-in: it becomes a service only once its config
+# exists (bin/connector.sh writes the template on first run).
+SERVICES="com.docklets.gateway com.docklets.deployer"
+if [ -f "$HOME/.config/docklets/connector.env" ]; then
+  plist com.docklets.connector "<string>/bin/bash</string><string>$REPO/bin/connector.sh</string>" connector
+  SERVICES="$SERVICES com.docklets.connector"
+fi
+
+for svc in $SERVICES; do
   launchctl bootout "gui/$(id -u)/$svc" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$AGENTS/$svc.plist"
 done

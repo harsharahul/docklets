@@ -155,6 +155,8 @@ git clone https://github.com/harsharahul/docklets && cd docklets
 
 # Linux (systemd user services)
 ./install/install-linux.sh ~/docklets 8080
+# (re-run an installer after filling ~/.config/docklets/connector.env and it
+#  also manages the tunnel connector as a service)
 
 # deploy the example app
 cp -R examples/guestbook ~/docklets/
@@ -268,8 +270,10 @@ directory.
 you get a public URL while files, containers, and data stay on your machine.
 It dials out (NAT and CGNAT friendly, no inbound ports), refuses to tunnel the
 admin plane, verifies the pinned frp binary by sha256, and keeps its ingress
-token outside the asset root where agents and apps can never reach it. Setup
-and security details: [docs/tunnel.md](docs/tunnel.md).
+token outside the asset root where agents and apps can never reach it. With
+`TUNNEL_PROTOCOL=wss` it dials the edge as an ordinary TLS websocket, so it
+works through HTTPS ingresses and CDNs and from networks that only allow
+outbound HTTPS. Setup and security details: [docs/tunnel.md](docs/tunnel.md).
 
 The server half ships too: `edge/` runs as a single hardened container on any
 VPS (`docker compose up`) or as sharded deployments on Kubernetes, with the
@@ -297,8 +301,8 @@ docker logs docklet-<slug>
 # deployer log
 tail -f <root>/.gateway/logs/deployer.log
 
-# stop everything (asset root untouched)
-./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer}
+# stop everything (asset root untouched; includes the connector service if present)
+./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer,connector}
 ```
 
 ## Roadmap
