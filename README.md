@@ -155,6 +155,8 @@ git clone https://github.com/harsharahul/docklets && cd docklets
 
 # Linux (systemd user services)
 ./install/install-linux.sh ~/docklets 8080
+# (re-run an installer after filling ~/.config/docklets/connector.env and it
+#  also manages the tunnel connector as a service)
 
 # deploy the example app
 cp -R examples/guestbook ~/docklets/
@@ -299,8 +301,8 @@ docker logs docklet-<slug>
 # deployer log
 tail -f <root>/.gateway/logs/deployer.log
 
-# stop everything (asset root untouched)
-./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer}
+# stop everything (asset root untouched; includes the connector service if present)
+./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer,connector}
 ```
 
 ## Roadmap

@@ -3,7 +3,7 @@
 # Your asset root (sites, apps, .data) is NOT touched.
 set -uo pipefail
 
-for svc in com.docklets.gateway com.docklets.deployer; do
+for svc in com.docklets.gateway com.docklets.deployer com.docklets.connector; do
   launchctl bootout "gui/$(id -u)/$svc" 2>/dev/null && echo "stopped $svc"
   rm -f "$HOME/Library/LaunchAgents/$svc.plist" && echo "removed $svc.plist"
 done

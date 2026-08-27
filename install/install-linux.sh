@@ -65,7 +65,28 @@ RestartSec=3
 WantedBy=default.target
 EOF
 
+# The tunnel connector is opt-in: it becomes a service only once its config
+# exists (bin/connector.sh writes the template on first run).
+UNITS_TO_ENABLE="docklets-gateway docklets-deployer"
+if [ -f "$HOME/.config/docklets/connector.env" ]; then
+  cat > "$UNITS/docklets-connector.service" <<EOF
+[Unit]
+Description=docklets tunnel connector (public URL, data stays local)
+After=docklets-gateway.service
+
+[Service]
+ExecStart=/bin/bash $REPO/bin/connector.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+  UNITS_TO_ENABLE="$UNITS_TO_ENABLE docklets-connector"
+fi
+
 systemctl --user daemon-reload
-systemctl --user enable --now docklets-gateway docklets-deployer
+# shellcheck disable=SC2086  # word-splitting the unit list is intended
+systemctl --user enable --now $UNITS_TO_ENABLE
 
 echo "docklets installed. root: $ROOT · gateway: http://localhost:$PORT/"

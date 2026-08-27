@@ -30,6 +30,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   docs gain the matching ingress dial-hostname pattern (`docs/edge.md`); CI
   covers refusal without trust and a full round-trip through a
   TLS-terminating proxy.
+- The installers manage the tunnel connector as a service
+  (`com.docklets.connector` on macOS, `docklets-connector.service` on
+  Linux) once `~/.config/docklets/connector.env` exists; installs without
+  that config are unchanged, and the uninstaller removes the service
+  either way.
 
 ## [0.3.0] - 2026-08-25
 
