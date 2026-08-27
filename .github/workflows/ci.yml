@@ -211,6 +211,27 @@ jobs:
             || { echo "::error::docklet API not served through tunnel"; exit 1; }
           [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: nobody.docklets.test' http://127.0.0.1:8080/)" = "404" ] \
             || { echo "::error::unknown tenant not 404"; exit 1; }
+          # managed-edge auth: user + token metadata (managed deployments
+          # validate these in an edge-side plugin; a bare frps accepts the
+          # login and namespaces the proxy under the user)
+          printf 'bindPort = 17001\nvhostHTTPPort = 17080\nsubdomainHost = "docklets.test"\n' > /tmp/frps-managed.toml
+          "/tmp/frp_${FRP_VERSION}_linux_amd64/frps" -c /tmp/frps-managed.toml > /tmp/frps-managed.log 2>&1 &
+          for i in $(seq 1 15); do
+            (echo > /dev/tcp/127.0.0.1/17001) 2>/dev/null && break; sleep 1
+          done
+          printf 'TUNNEL_SERVER=127.0.0.1\nTUNNEL_PORT=17001\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=ci-user\nTUNNEL_USER=ci-user\nLOCAL_PORT=8081\n' > "$T/conf/managed.env"
+          DOCKLETS_CONNECTOR_CONFIG="$T/conf/managed.env" DOCKLETS_CONNECTOR_HOME="$T/conf" ./bin/connector.sh > "$T/managed.log" 2>&1 &
+          for i in $(seq 1 20); do grep -q "start proxy success" "$T/managed.log" && break; sleep 1; done
+          grep -q "start proxy success" "$T/managed.log" \
+            || { echo "::error::managed-mode tunnel never established"; cat "$T/managed.log"; exit 1; }
+          curl -sf -H "Host: ci-user.docklets.test" http://127.0.0.1:17080/hello-static/ | grep -q "It works" \
+            || { echo "::error::managed-mode round-trip failed"; exit 1; }
+          grep -q 'user = "ci-user"' "$T/conf/frpc.generated.toml"
+          grep -q 'metadatas.token = "ci-token"' "$T/conf/frpc.generated.toml"
+          if grep -q 'auth.token' "$T/conf/frpc.generated.toml"; then
+            echo "::error::managed mode leaked auth.token"; exit 1
+          fi
+          pkill -f 'frps -c /tmp/frps-managed.toml' || true
       - name: Verify wss transport through a TLS-terminating proxy
         run: |
           T="$(mktemp -d)"; mkdir -p "$T/conf" "$T/wss"

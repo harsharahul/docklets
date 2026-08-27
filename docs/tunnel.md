@@ -54,6 +54,7 @@ Config fields:
 | `LOCAL_PORT` | the docklets gateway port (default 8080; the admin port is refused) |
 | `TUNNEL_PROTOCOL` | `tcp` (default) or `wss`; wss dials the edge as a TLS websocket, so it traverses HTTPS proxies and CDNs |
 | `TUNNEL_CA_FILE` | wss only: CA bundle used to verify the edge certificate (default: the system bundle) |
+| `TUNNEL_USER` | managed edges only: your assigned user; the token then authenticates that user instead of the whole edge |
 
 Your asset root is then served at `http(s)://<TUNNEL_NAME>.<subdomainHost>/`,
 with every slug at its usual `/<slug>/` route. New apps and sites appear on
@@ -74,6 +75,16 @@ seconds, so any proxy on the path needs its read timeout above that;
 90 seconds or more is a safe setting. On the server side, route the dial
 hostname through your HTTPS ingress to the frps bind port with websocket
 upgrade enabled.
+
+## Managed multi-tenant edges
+
+A managed edge assigns each tenant a user and a personal token. Set
+`TUNNEL_USER` (usually the same as `TUNNEL_NAME`) and the connector
+authenticates as that user, with the token sent as connection metadata that
+the edge validates per tenant. Leaking the token still exposes only your own
+route, never anyone else's, and the edge can revoke it without touching
+other tenants. Without `TUNNEL_USER` the connector uses classic edge-wide
+token auth, which fits a private frp server you run yourself.
 
 ## Running as a service
 

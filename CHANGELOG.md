@@ -22,6 +22,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   bundle or `TUNNEL_CA_FILE` and refuses to connect unverified. CI covers
   refusal without trust and a full round-trip through a TLS-terminating
   proxy.
+- Managed-edge authentication for the connector (`TUNNEL_USER`): the
+  connector can authenticate as an assigned user with a per-tenant token
+  sent as connection metadata, so multi-tenant edges can validate and
+  revoke tenants individually. Classic edge-wide token auth is unchanged
+  and remains the default. CI covers both configuration shapes and a
+  managed-mode round-trip.
 - The installers manage the tunnel connector as a service
   (`com.docklets.connector` on macOS, `docklets-connector.service` on
   Linux) once `~/.config/docklets/connector.env` exists; installs without
