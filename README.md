@@ -1,4 +1,7 @@
-# docklets
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-horizontal-dark.svg">
+  <img src="docs/assets/logo-horizontal.svg" alt="docklets" width="280">
+</picture>
 
 **A filesystem is your deploy API: one directory becomes a self-hosted app platform where writing files is the only deploy step.**
 
