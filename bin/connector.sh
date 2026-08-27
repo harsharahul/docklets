@@ -175,7 +175,8 @@ $TRANSPORT_LINES
 loginFailExit = false
 
 [[proxies]]
-name = "gateway"
+# proxy names are unique per edge, so register under the tenant's name
+name = "$TUNNEL_NAME"
 type = "http"
 subdomain = "$TUNNEL_NAME"
 localIP = "127.0.0.1"
