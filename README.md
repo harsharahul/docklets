@@ -268,8 +268,10 @@ directory.
 you get a public URL while files, containers, and data stay on your machine.
 It dials out (NAT and CGNAT friendly, no inbound ports), refuses to tunnel the
 admin plane, verifies the pinned frp binary by sha256, and keeps its ingress
-token outside the asset root where agents and apps can never reach it. Setup
-and security details: [docs/tunnel.md](docs/tunnel.md).
+token outside the asset root where agents and apps can never reach it. With
+`TUNNEL_PROTOCOL=wss` it dials the edge as an ordinary TLS websocket, so it
+works through HTTPS ingresses and CDNs and from networks that only allow
+outbound HTTPS. Setup and security details: [docs/tunnel.md](docs/tunnel.md).
 
 The server half ships too: `edge/` runs as a single hardened container on any
 VPS (`docker compose up`) or as sharded deployments on Kubernetes, with the

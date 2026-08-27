@@ -64,7 +64,8 @@ The admin plane is a token-authenticated local daemon for lifecycle actions
 `bin/connector.sh` connects the asset root to any frp-compatible edge server
 for a public URL while everything stays local. First run writes
 `~/.config/docklets/connector.env`; fill in the edge host, token, and
-subdomain, then run it under a service manager. It refuses to tunnel the
+subdomain, then run it under a service manager. Edges behind an HTTPS proxy
+or CDN are dialed with `TUNNEL_PROTOCOL=wss`. It refuses to tunnel the
 admin plane. Details: `docs/tunnel.md`. As with the admin token, tell the
 user where the config lives; do not read the tunnel token into the
 conversation.

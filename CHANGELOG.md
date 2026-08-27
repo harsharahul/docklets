@@ -22,6 +22,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the asset root, and reconnects automatically. Documented in
   `docs/tunnel.md`; CI runs a full tunnel round-trip (static asset and
   docklet API through a local edge, admin-port refusal, unknown-tenant 404).
+- Websocket transport for the connector (`TUNNEL_PROTOCOL=wss`): the tunnel
+  dials the edge as a TLS websocket, so it enters through HTTPS ingresses,
+  reverse proxies, and CDNs, and works from networks that only allow
+  outbound HTTPS. wss verifies the edge certificate against the system CA
+  bundle or `TUNNEL_CA_FILE` and refuses to connect unverified. The edge
+  docs gain the matching ingress dial-hostname pattern (`docs/edge.md`); CI
+  covers refusal without trust and a full round-trip through a
+  TLS-terminating proxy.
 
 ## [0.3.0] - 2026-08-25
 

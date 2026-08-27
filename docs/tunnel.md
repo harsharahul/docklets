@@ -52,10 +52,27 @@ Config fields:
 | `TUNNEL_TOKEN` | the auth token from the server config |
 | `TUNNEL_NAME` | your subdomain claim, lowercase kebab-case |
 | `LOCAL_PORT` | the docklets gateway port (default 8080; the admin port is refused) |
+| `TUNNEL_PROTOCOL` | `tcp` (default) or `wss`; wss dials the edge as a TLS websocket, so it traverses HTTPS proxies and CDNs |
+| `TUNNEL_CA_FILE` | wss only: CA bundle used to verify the edge certificate (default: the system bundle) |
 
 Your asset root is then served at `http(s)://<TUNNEL_NAME>.<subdomainHost>/`,
 with every slug at its usual `/<slug>/` route. New apps and sites appear on
 the public URL the moment their files are written, exactly as they do locally.
+
+## Dialing over websocket
+
+When the edge sits behind an HTTPS ingress, reverse proxy, or CDN instead of
+exposing a raw TCP port, set `TUNNEL_PROTOCOL=wss` and point `TUNNEL_SERVER`
+and `TUNNEL_PORT` (usually 443) at that HTTPS front. The tunnel then rides as
+an ordinary TLS websocket, which also works from networks that only allow
+outbound HTTPS.
+
+In wss mode the connector verifies the edge's certificate against the system
+CA bundle, or against `TUNNEL_CA_FILE` for private CAs, and refuses to
+connect if verification fails. The tunnel client sends heartbeats every 30
+seconds, so any proxy on the path needs its read timeout above that;
+90 seconds or more is a safe setting. See
+[docs/edge.md](edge.md) for the matching edge-side ingress route.
 
 ## Running as a service
 
