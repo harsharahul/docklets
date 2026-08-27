@@ -279,6 +279,11 @@ The connector speaks standard frp, so the server side is any frp server you
 already run or rent: a minimal `frps.toml` for a VPS is in
 [docs/tunnel.md](docs/tunnel.md).
 
+Or skip running a server entirely: [docklets.dev](https://docklets.dev) is
+the managed edge run by the docklets project, currently in invite-only
+preview. Your subdomain, your token, your data at home. The traffic path is
+explained in [How docklets works](https://harsharahul.com/how-docklets-works/).
+
 ## Security model
 
 Read [SECURITY.md](SECURITY.md) for the full threat model, verified boundary
@@ -307,8 +312,6 @@ tail -f <root>/.gateway/logs/deployer.log
 
 ## Roadmap
 
-- A managed tunnel edge, so the connector works without bringing your own
-  server
 - Per-app egress policy (offline-by-default apps, allowlisted hosts)
 - Read-only app rootfs once dependency install moves to a build step
 - More runtimes (bun, deno, static binaries)
