@@ -1,6 +1,0 @@
-# docklets edge configuration. Copy to frps.toml and fill in.
-bindPort = 7000                 # connectors dial this
-vhostHTTPPort = 8080            # public HTTP enters here (front with any TLS proxy)
-subdomainHost = "example.com"   # you own this; *.example.com resolves to this host
-auth.method = "token"
-auth.token = "CHANGE-ME"        # give each machine's connector this token

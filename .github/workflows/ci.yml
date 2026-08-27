@@ -179,14 +179,18 @@ jobs:
           done
           curl -sf http://127.0.0.1:8081/guestbook/api/messages | grep -q '"text":"ci"' || fail "data lost across pause/resume"
           kill $ADMIN_PID
-      - name: Verify tunnel connector end to end against the shipped edge
+      - name: Verify tunnel connector end to end against a stock frp server
         run: |
           T="$(mktemp -d)"
-          # the REAL edge artifact: build edge/Dockerfile and run it
-          docker build -q -t docklets-edge-ci edge/
-          printf 'bindPort = 7000\nvhostHTTPPort = 8080\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > "$T/frps.toml"
-          docker run -d --name dk-ci-edge --network host \
-            -v "$T/frps.toml":/etc/frps/frps.toml:ro docklets-edge-ci
+          # the connector works with any frp server: test against the pinned
+          # upstream frps release, checksum-verified
+          FRP_VERSION=0.71.0
+          SHA=84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716
+          curl -fsSL -o /tmp/frp.tgz "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz"
+          echo "$SHA  /tmp/frp.tgz" | sha256sum -c -
+          tar -xzf /tmp/frp.tgz -C /tmp "frp_${FRP_VERSION}_linux_amd64/frps"
+          printf 'bindPort = 7000\nvhostHTTPPort = 8080\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > /tmp/frps.toml
+          "/tmp/frp_${FRP_VERSION}_linux_amd64/frps" -c /tmp/frps.toml > /tmp/frps.log 2>&1 &
           for i in $(seq 1 15); do
             (echo > /dev/tcp/127.0.0.1/7000) 2>/dev/null && break; sleep 1
           done
@@ -248,12 +252,8 @@ jobs:
             || { echo "::error::wss tunnel never established"; cat "$T/wss.log"; docker logs dk-ci-wssproxy; exit 1; }
           curl -sf -H "Host: ci-wss.docklets.test" http://127.0.0.1:8080/hello-static/ | grep -q "It works" \
             || { echo "::error::static asset not served through wss tunnel"; exit 1; }
-          docker rm -f dk-ci-wssproxy dk-ci-edge
-      - name: Validate edge deployment manifests
-        run: |
-          docker compose -f edge/docker-compose.yml config -q
-          pip install -q pyyaml 2>/dev/null || pip3 install -q pyyaml
-          python3 -c "import yaml,sys; list(yaml.safe_load_all(open('edge/k8s/edge.yaml'))); print('edge k8s yaml valid')"
+          docker rm -f dk-ci-wssproxy
+          pkill -f 'frps -c /tmp/frps.toml' || true
       - name: Verify removal lifecycle
         run: |
           rm "$TESTROOT/guestbook/app.json"

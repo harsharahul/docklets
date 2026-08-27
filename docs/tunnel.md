@@ -71,8 +71,9 @@ In wss mode the connector verifies the edge's certificate against the system
 CA bundle, or against `TUNNEL_CA_FILE` for private CAs, and refuses to
 connect if verification fails. The tunnel client sends heartbeats every 30
 seconds, so any proxy on the path needs its read timeout above that;
-90 seconds or more is a safe setting. See
-[docs/edge.md](edge.md) for the matching edge-side ingress route.
+90 seconds or more is a safe setting. On the server side, route the dial
+hostname through your HTTPS ingress to the frps bind port with websocket
+upgrade enabled.
 
 ## Running as a service
 
