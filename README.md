@@ -150,6 +150,16 @@ Deeper detail lives in [docs/architecture.md](docs/architecture.md).
 
 Requirements: Docker (or OrbStack/Colima), Node 20 or newer, macOS or Linux.
 
+The setup wizard is one command; it asks where your folder should live and
+which port, then does everything (and is safe to re-run any time). Read it
+first if you like: [install/setup.sh](install/setup.sh).
+
+```bash
+curl -fsSL https://docklets.dev/install | bash
+```
+
+Or the manual route:
+
 ```bash
 git clone https://github.com/harsharahul/docklets && cd docklets
 
@@ -166,12 +176,35 @@ cp -R examples/guestbook ~/docklets/
 open http://localhost:8080/guestbook/      # live within ~10 seconds
 ```
 
+Then pick your path; all three end the same way:
+
+```bash
+# With Claude Code: it reads the instructions the installer dropped
+cd ~/docklets && claude
+> build me a guestbook and publish it
+
+# With Codex, Cursor, Zed, Amp (anything that reads AGENTS.md): same move
+cd ~/docklets && codex
+
+# No agent at all: a folder with files is a website
+mkdir ~/docklets/hello && echo '<h1>hello</h1>' > ~/docklets/hello/index.html
+open http://localhost:8080/hello/
+```
+
 Or run it by hand, no services:
 
 ```bash
 DOCKLETS_ROOT=~/docklets ./bin/serve.sh &          # gateway
 DOCKLETS_ROOT=~/docklets node bin/deployer.mjs     # deployer (--once for a single pass)
 ```
+
+Going public is two paths as well. Bring your own front door: point any
+reverse proxy or tunnel you already run at the gateway port, done. Or use a
+managed edge: [docklets.dev](https://docklets.dev)'s dashboard hands you a
+single Terminal command that writes `~/.config/docklets/connector.env`,
+locks its permissions, and restarts the connector service when one exists;
+on a first-time setup, run the wizard once more and it manages the
+connector from then on.
 
 ## The manifest
 
