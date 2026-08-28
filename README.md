@@ -166,12 +166,35 @@ cp -R examples/guestbook ~/docklets/
 open http://localhost:8080/guestbook/      # live within ~10 seconds
 ```
 
+Then pick your path; all three end the same way:
+
+```bash
+# With Claude Code: it reads the instructions the installer dropped
+cd ~/docklets && claude
+> build me a guestbook and publish it
+
+# With Codex, Cursor, Zed, Amp (anything that reads AGENTS.md): same move
+cd ~/docklets && codex
+
+# No agent at all: a folder with files is a website
+mkdir ~/docklets/hello && echo '<h1>hello</h1>' > ~/docklets/hello/index.html
+open http://localhost:8080/hello/
+```
+
 Or run it by hand, no services:
 
 ```bash
 DOCKLETS_ROOT=~/docklets ./bin/serve.sh &          # gateway
 DOCKLETS_ROOT=~/docklets node bin/deployer.mjs     # deployer (--once for a single pass)
 ```
+
+Going public is two paths as well. Bring your own front door: point any
+reverse proxy or tunnel you already run at the gateway port, done. Or use a
+managed edge: [docklets.dev](https://docklets.dev)'s dashboard hands you a
+single Terminal command that writes `~/.config/docklets/connector.env`,
+locks its permissions, and restarts the connector service when one exists;
+on a first-time setup, re-run the installer and it manages the connector
+from then on.
 
 ## The manifest
 
