@@ -150,6 +150,16 @@ Deeper detail lives in [docs/architecture.md](docs/architecture.md).
 
 Requirements: Docker (or OrbStack/Colima), Node 20 or newer, macOS or Linux.
 
+The setup wizard is one command; it asks where your folder should live and
+which port, then does everything (and is safe to re-run any time). Read it
+first if you like: [install/setup.sh](install/setup.sh).
+
+```bash
+curl -fsSL https://docklets.dev/install | bash
+```
+
+Or the manual route:
+
 ```bash
 git clone https://github.com/harsharahul/docklets && cd docklets
 
@@ -193,8 +203,8 @@ reverse proxy or tunnel you already run at the gateway port, done. Or use a
 managed edge: [docklets.dev](https://docklets.dev)'s dashboard hands you a
 single Terminal command that writes `~/.config/docklets/connector.env`,
 locks its permissions, and restarts the connector service when one exists;
-on a first-time setup, re-run the installer and it manages the connector
-from then on.
+on a first-time setup, run the wizard once more and it manages the
+connector from then on.
 
 ## The manifest
 
