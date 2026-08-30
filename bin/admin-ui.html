@@ -19,6 +19,9 @@
   pre{background:#8881;border-radius:8px;padding:.7rem;font-size:.75rem;overflow-x:auto;max-height:320px;white-space:pre-wrap}
   .statics{color:var(--mut);font-size:.85rem}
   #err{color:var(--bad);font-size:.85rem}
+  /* The lockup's canvas is wider than its artwork (art ends at 62% of the
+     width); trim the baked empty space so the flex gap sets the spacing. */
+  .logo{margin-right:-43px}
   .logo-dark{display:none}
   @media(prefers-color-scheme:dark){.logo-light{display:none}.logo-dark{display:inline}}
 </style>
