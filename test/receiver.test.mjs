@@ -88,3 +88,64 @@ test('upload round trip: need list, sha verification, staged invisibly', async (
   assert.equal(second.status, 409, 'concurrent session accepted');
   await api('POST', '/sync/abort', { body: { session } });
 });
+
+async function fullSync(files) {
+  const start = await api('POST', '/sync/start', { body: { files: files.map(({ path: p, data }) => ({
+    path: p, size: Buffer.byteLength(data),
+    sha256: createHash('sha256').update(data).digest('hex'),
+  })) } });
+  assert.equal(start.status, 200);
+  const { session, need } = await start.json();
+  for (const p of need) {
+    const f = files.find((x) => x.path === p);
+    const r = await api('PUT', `/sync/file?session=${session}&path=${encodeURIComponent(p)}`, { raw: f.data });
+    assert.equal(r.status, 200, p);
+  }
+  const fin = await api('POST', '/sync/finish', { body: { session } });
+  assert.equal(fin.status, 200);
+  return fin.json();
+}
+
+test('finish applies the mirror: adds, updates, deletes, prunes empty dirs', async () => {
+  let s = await fullSync([
+    { path: 'index.html', data: 'v1' },
+    { path: 'notes/a.md', data: 'note a' },
+    { path: 'notes/deep/b.md', data: 'note b' },
+  ]);
+  assert.equal(s.added, 3);
+  assert.equal(fs.readFileSync(path.join(root, 'index.html'), 'utf8'), 'v1');
+
+  s = await fullSync([
+    { path: 'index.html', data: 'v2 changed' },
+    { path: 'notes/a.md', data: 'note a' },
+  ]);
+  assert.equal(s.updated, 1);
+  assert.equal(s.deleted, 1);
+  assert.equal(fs.readFileSync(path.join(root, 'index.html'), 'utf8'), 'v2 changed');
+  assert.ok(!fs.existsSync(path.join(root, 'notes', 'deep')), 'empty dir not pruned');
+  assert.ok(!fs.existsSync(path.join(root, '.sync-lock')), 'lock left behind');
+  assert.equal(fs.readdirSync(root).filter((e) => e.startsWith('.staging-')).length, 0);
+});
+
+test('mirror delete never touches dot-entries or the status dashboard', async () => {
+  fs.mkdirSync(path.join(root, '.gateway'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.gateway', 'keep'), 'x');
+  fs.mkdirSync(path.join(root, 'status'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'status', 'index.html'), 'dash');
+  await fullSync([{ path: 'only.txt', data: 'only' }]);
+  assert.ok(fs.existsSync(path.join(root, '.gateway', 'keep')));
+  assert.ok(fs.existsSync(path.join(root, 'status', 'index.html')));
+});
+
+test('finish with missing uploads is refused; abort discards staging', async () => {
+  const start = await api('POST', '/sync/start', { body: { files: [
+    { path: 'x.txt', size: 1, sha256: createHash('sha256').update('x').digest('hex') },
+  ] } });
+  const { session } = await start.json();
+  const fin = await api('POST', '/sync/finish', { body: { session } });
+  assert.equal(fin.status, 409);
+  assert.deepEqual((await fin.json()).missing, ['x.txt']);
+  assert.equal((await api('POST', '/sync/abort', { body: { session } })).status, 200);
+  assert.equal(fs.readdirSync(root).filter((e) => e.startsWith('.staging-')).length, 0);
+  assert.ok(fs.existsSync(path.join(root, 'only.txt')), 'abort touched the live tree');
+});
