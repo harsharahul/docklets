@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Not-found page: a request for a path nothing serves answers with a
+  readable page naming the missing path instead of an empty response, in
+  light or dark to match the visitor. An asset root's own `404.html`
+  replaces it. CI covers the built-in page, its content type, and the
+  override.
 - Tunnel connector (`bin/connector.sh`): exposes a self-hosted asset root
   through any frp-compatible edge while files, containers, and data stay
   local. Dials out only, refuses to tunnel the admin plane, pins the frp
