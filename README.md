@@ -235,6 +235,9 @@ Rules your app lives by:
 
 Full specification: [docs/manifest.md](docs/manifest.md).
 
+A request for a path nothing serves gets a plain not-found page. Put your
+own `404.html` in the asset root to replace it everywhere.
+
 ## Using it with an AI agent
 
 The installers drop a filled-in `AGENTS.md` (and a `CLAUDE.md` symlink to it)
