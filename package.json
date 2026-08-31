@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "check": "node --check bin/deployer.mjs && bash -n bin/serve.sh bin/connector.sh install/setup.sh install/install-macos.sh install/install-linux.sh install/uninstall-macos.sh"
+    "check": "node --check bin/deployer.mjs && bash -n bin/serve.sh bin/connector.sh install/setup.sh install/install-macos.sh install/install-linux.sh install/uninstall-macos.sh",
+    "test": "node --test test/*.test.mjs"
   }
 }
