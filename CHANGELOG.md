@@ -63,6 +63,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that config are unchanged, and the uninstaller removes the service
   either way.
 
+- Receiver read endpoints: `GET /sync/manifest` lists the live tree by
+  manifest rules and `GET /sync/file?path=` returns one file, so a client
+  can change a few files without re-declaring the whole folder from
+  scratch. Both sit behind the same bearer check as writes.
+- Extra hash files for the receiver: a hash file may hold several hashes,
+  one per line, and `DOCKLETS_SYNC_TOKEN_HASH_FILES` names optional extra
+  files, so a second writer holds its own token and is revoked on its own.
+  CI proves a second writer through the container image.
+
+### Fixed
+
+- Receiver: two `POST /sync/start` requests that overlapped while the
+  receiver hashed files already on disk could both proceed, and the later
+  one silently replaced the first session. The slot is now reserved before
+  hashing, so the second start answers 409 as documented.
+
 ## [0.3.0] - 2026-08-25
 
 ### Added

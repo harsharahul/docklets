@@ -31,6 +31,7 @@ kubernetes, systemd) restart it.
 | `DOCKLETS_ROOT` | required | the mounted folder |
 | `DOCKLETS_DRIVER` | `none` | app runner mode; `docker` needs a docker socket, which this container does not have |
 | `DOCKLETS_SYNC_TOKEN_HASH_FILE` | unset | enables the receiver (see docs/sync.md) |
+| `DOCKLETS_SYNC_TOKEN_HASH_FILES` | unset | colon-separated extra hash files for additional writers |
 | `DOCKLETS_RECEIVER_ADDR` | `0.0.0.0` | receiver listen address inside the container |
 | `DOCKLETS_CONNECTOR_CONFIG` | `/etc/docklets/connector.env` | connector config (see docs/tunnel.md) |
 
