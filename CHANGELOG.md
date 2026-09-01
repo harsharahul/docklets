@@ -72,6 +72,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   files, so a second writer holds its own token and is revoked on its own.
   CI proves a second writer through the container image.
 
+- README: docklets.dev as an MCP connector (Claude, ChatGPT, Claude Code,
+  Codex, VS Code), pointing at docklets.dev/connect.
+
 ### Fixed
 
 - Receiver: two `POST /sync/start` requests that overlapped while the
