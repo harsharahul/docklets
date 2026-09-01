@@ -61,8 +61,12 @@ export function scryptVerify(token, stored) {
   try {
     const [tag, n, salt, key] = String(stored).trim().split('$');
     if (tag !== 'scrypt') return false;
-    const want = Buffer.from(key, 'base64url');
-    const got = scryptSync(token, Buffer.from(salt, 'base64url'), want.length,
+    // Two wire encodings exist for salt and key: this repo mints base64url
+    // (22-char salt), managed control planes store hex (32-char salt).
+    // Salt shape discriminates unambiguously.
+    const enc = /^[0-9a-f]{32}$/.test(salt) ? 'hex' : 'base64url';
+    const want = Buffer.from(key, enc);
+    const got = scryptSync(token, Buffer.from(salt, enc), want.length,
       { N: Number(n), r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 });
     return want.length === KEY_LEN && timingSafeEqual(want, got);
   } catch { return false; }
