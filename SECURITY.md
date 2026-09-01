@@ -120,9 +120,12 @@ sync token can make the folder match theirs, including making it emptier.
 That makes the sync token a write credential, deliberately separate from the
 tunnel token (an ingress credential); leaking one never grants the other's
 power. The token is stored only as an scrypt hash; the plaintext exists
-client-side and in flight. Every request is verified against the hash file
-(re-read per request, so rotation is a file write), and an unreadable hash
-file fails closed.
+client-side and in flight. Every request is verified against the hash files
+(re-read per request, so rotation is a file write), and an unreadable
+primary hash file fails closed. A hash file may hold several hashes and
+`DOCKLETS_SYNC_TOKEN_HASH_FILES` may add more files, so a second writer
+holds its own token and is revoked on its own; extra files are optional
+and a missing one is skipped, never treated as an open door.
 
 What a sync can write is bounded: forward-slash relative paths only, no
 dot-entries at any depth (the deployer's state, app data, and lock files are
@@ -131,7 +134,12 @@ folder is never written or deleted. Uploads land in a hidden staging area
 and are verified byte for byte against their declared sha256 before the
 commit step touches the live tree; during that brief step the receiver
 holds `.sync-lock`, which the deployer honors, so a half-applied sync is
-never deployed. Total, per-file, and file-count caps apply.
+never deployed. Total, per-file, and file-count caps apply. Only one
+session exists at a time: the slot is reserved before the receiver starts
+hashing files already on disk, so two overlapping starts cannot both
+proceed. The read endpoints (`/sync/manifest`, `/sync/file`) sit behind the
+same bearer check and refuse every path a sync would never write, so
+dot-entries and the status folder are never readable through them.
 
 The receiver binds 127.0.0.1 by default. Bind it wider only behind a
 private network boundary or an authenticating proxy.
