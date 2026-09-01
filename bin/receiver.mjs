@@ -9,10 +9,17 @@
  * live tree never holds a half-applied sync: converge honors .sync-lock
  * during the brief finish step.
  *
- * Auth: every request (except /healthz) carries the plaintext sync token as
- * a bearer header, verified against an scrypt hash on disk. The plaintext
- * is never stored here. The hash file is re-read per request, so rotating
- * the token needs no restart; an unreadable hash file fails closed.
+ * Auth: every request (except /healthz) carries a plaintext token as a
+ * bearer header, verified against scrypt hashes on disk. The plaintext is
+ * never stored here. Hash files are re-read per request, so rotating a
+ * token needs no restart; an unreadable primary hash file fails closed.
+ * A hash file holds one hash per line, and DOCKLETS_SYNC_TOKEN_HASH_FILES
+ * names optional extra files, so a second writer (another machine, or a
+ * managed control plane) can hold its own token and be revoked alone.
+ *
+ * Reads: GET /sync/manifest lists the live tree by manifest rules and
+ * GET /sync/file?path= returns one file, so a client can express a partial
+ * change as the full mirror the protocol requires.
  *
  * What a synced folder can contain: regular files with forward-slash
  * relative paths. Dot-entries, symlinks, and the reserved status dashboard
@@ -23,6 +30,7 @@
  *   node receiver.mjs --hash TOKEN    # print the scrypt hash for TOKEN
  *
  * Env: DOCKLETS_ROOT, DOCKLETS_SYNC_TOKEN_HASH_FILE,
+ *   DOCKLETS_SYNC_TOKEN_HASH_FILES (optional, colon-separated extras),
  *   DOCKLETS_RECEIVER_PORT (9000; 0 picks a free port),
  *   DOCKLETS_RECEIVER_ADDR (127.0.0.1), DOCKLETS_SYNC_MAX_BYTES (2 GiB),
  *   DOCKLETS_SYNC_MAX_FILES (20000), DOCKLETS_SYNC_MAX_FILE_BYTES (100 MiB),
@@ -43,6 +51,7 @@ if (process.argv[2] === '--hash') {
 
 const ROOT = path.resolve(process.env.DOCKLETS_ROOT || '');
 const HASH_FILE = process.env.DOCKLETS_SYNC_TOKEN_HASH_FILE || '';
+const EXTRA_HASH_FILES = (process.env.DOCKLETS_SYNC_TOKEN_HASH_FILES || '').split(':').filter(Boolean);
 const PORT = Number(process.env.DOCKLETS_RECEIVER_PORT ?? 9000);
 const ADDR = process.env.DOCKLETS_RECEIVER_ADDR || '127.0.0.1';
 const MAX_BYTES = Number(process.env.DOCKLETS_SYNC_MAX_BYTES || 2 * 1024 ** 3);
@@ -60,11 +69,23 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 let session = null; // one at a time: { id, files:Map, need:Set, received:Set, existed:Set, staging, createdAt, bytes }
 let lastAuthFailLog = 0;
 
+/** Every stored hash, one per non-blank line across the primary file and
+ *  any readable extra file; null when the primary cannot be read. */
+function storedHashes() {
+  let lines;
+  try { lines = fs.readFileSync(HASH_FILE, 'utf8').split('\n'); } catch { return null; }
+  for (const f of EXTRA_HASH_FILES) {
+    // Extras are optional by design: a missing one is not a failure.
+    try { lines.push(...fs.readFileSync(f, 'utf8').split('\n')); } catch {}
+  }
+  return lines.map((l) => l.trim()).filter(Boolean);
+}
+
 function auth(req) {
-  let stored;
-  try { stored = fs.readFileSync(HASH_FILE, 'utf8').trim(); } catch { return 'unavailable'; }
+  const stored = storedHashes();
+  if (!stored) return 'unavailable';
   const given = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (given && scryptVerify(given, stored)) return 'ok';
+  if (given && stored.some((h) => scryptVerify(given, h))) return 'ok';
   const now = Date.now();
   if (now - lastAuthFailLog > 60_000) { lastAuthFailLog = now; log('rejected unauthorized request(s)'); }
   return 'bad';
@@ -78,6 +99,12 @@ function dropSession(s) {
 function freshSession() {
   if (session && Date.now() - session.createdAt > SESSION_TTL) dropSession(session);
   return session;
+}
+
+/** The session uploads and finish may act on: started, not merely reserved. */
+function activeSession() {
+  const s = freshSession();
+  return s && !s.starting ? s : null;
 }
 
 /** Every entry currently in the live tree, by manifest rules. */
@@ -128,32 +155,69 @@ async function handleStart(body) {
   if (total > MAX_BYTES) return { code: 413, body: { error: 'over quota', maxBytes: MAX_BYTES } };
   if (freshSession()) return { code: 409, body: { error: 'sync already in progress' } };
 
-  const manifest = new Map(files.map((f) => [f.path, f]));
-  const need = [];
-  const existed = new Set();
-  for (const [p, f] of manifest) {
-    const live = path.join(ROOT, p);
-    let same = false;
-    try {
-      const st = fs.lstatSync(live);
-      if (st.isFile()) {
-        existed.add(p);
-        same = st.size === f.size && (await hashFile(live)) === f.sha256;
-      }
-    } catch {}
-    if (!same) need.push(p);
-  }
-  const extraneous = liveFiles().map((e) => e.path).filter((p) => !manifest.has(p)).sort();
+  // Reserve the slot before the first await: hashing the files already on
+  // disk yields to other requests, and a second start in that window must
+  // see a session in progress rather than silently replace this one.
   const id = randomBytes(16).toString('hex');
-  session = { id, files: manifest, need: new Set(need), received: new Set(), existed,
-    staging: path.join(ROOT, `.staging-${id}`), createdAt: Date.now(), bytes: 0 };
-  fs.mkdirSync(session.staging, { recursive: true });
-  log(`sync start: ${files.length} files, ${need.length} to upload, ${extraneous.length} extraneous`);
-  return { code: 200, body: { session: id, need: need.sort(), extraneous } };
+  session = { id, starting: true, createdAt: Date.now() };
+  try {
+    const manifest = new Map(files.map((f) => [f.path, f]));
+    const need = [];
+    const existed = new Set();
+    for (const [p, f] of manifest) {
+      const live = path.join(ROOT, p);
+      let same = false;
+      try {
+        const st = fs.lstatSync(live);
+        if (st.isFile()) {
+          existed.add(p);
+          same = st.size === f.size && (await hashFile(live)) === f.sha256;
+        }
+      } catch {}
+      if (!same) need.push(p);
+    }
+    const extraneous = liveFiles().map((e) => e.path).filter((p) => !manifest.has(p)).sort();
+    session = { id, files: manifest, need: new Set(need), received: new Set(), existed,
+      staging: path.join(ROOT, `.staging-${id}`), createdAt: Date.now(), bytes: 0 };
+    fs.mkdirSync(session.staging, { recursive: true });
+    log(`sync start: ${files.length} files, ${need.length} to upload, ${extraneous.length} extraneous`);
+    return { code: 200, body: { session: id, need: need.sort(), extraneous } };
+  } catch (e) {
+    if (session && session.id === id) session = null;
+    throw e;
+  }
+}
+
+/** The live tree as a sync manifest: path, size, sha256, sorted by path. */
+async function liveManifest() {
+  const out = [];
+  for (const e of liveFiles()) {
+    if (!e.file) continue;
+    const live = path.join(ROOT, e.path);
+    out.push({ path: e.path, size: fs.statSync(live).size, sha256: await hashFile(live) });
+  }
+  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+function handleRead(res, u) {
+  const p = u.searchParams.get('path') || '';
+  // validRelPath refuses dot-entries and the status folder, so nothing the
+  // sync would not write is ever readable here either.
+  if (!validRelPath(p)) return sendJson(res, 400, { error: 'bad path' });
+  const live = path.join(ROOT, p);
+  let st;
+  try { st = fs.lstatSync(live); } catch { return sendJson(res, 404, { error: 'no such file' }); }
+  if (!st.isFile()) return sendJson(res, 404, { error: 'no such file' });
+  res.writeHead(200, {
+    'content-type': 'application/octet-stream',
+    'content-length': st.size,
+    'cache-control': 'no-store',
+  });
+  fs.createReadStream(live).on('error', () => res.destroy()).pipe(res);
 }
 
 function handleUpload(req, res, u) {
-  const s = freshSession();
+  const s = activeSession();
   const p = u.searchParams.get('path') || '';
   if (!s || u.searchParams.get('session') !== s.id) return sendJson(res, 404, { error: 'unknown session' });
   if (!s.need.has(p)) return sendJson(res, 409, { error: 'path not in need list' });
@@ -191,7 +255,7 @@ function handleUpload(req, res, u) {
 }
 
 function handleFinish(body) {
-  const s = freshSession();
+  const s = activeSession();
   if (!s || body?.session !== s.id) return { code: 404, body: { error: 'unknown session' } };
   const missing = [...s.need].filter((p) => !s.received.has(p));
   if (missing.length) return { code: 409, body: { error: 'missing files', missing: missing.slice(0, 20) } };
@@ -255,6 +319,8 @@ const server = http.createServer(async (req, res) => {
     const a = auth(req);
     if (a === 'unavailable') return sendJson(res, 503, { error: 'token hash unreadable, failing closed' });
     if (a !== 'ok') return sendJson(res, 401, { error: 'unauthorized' });
+    if (req.method === 'GET' && u.pathname === '/sync/manifest') return sendJson(res, 200, { files: await liveManifest() });
+    if (req.method === 'GET' && u.pathname === '/sync/file') return handleRead(res, u);
     if (req.method === 'PUT' && u.pathname === '/sync/file') return handleUpload(req, res, u);
     if (req.method === 'POST' && ['/sync/start', '/sync/finish', '/sync/abort'].includes(u.pathname)) {
       let body;
@@ -262,7 +328,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { return sendJson(res, e.code === 413 ? 413 : 400, { error: 'bad request body' }); }
       if (u.pathname === '/sync/start') { const r = await handleStart(body); return sendJson(res, r.code, r.body); }
       if (u.pathname === '/sync/finish') { const r = handleFinish(body); return sendJson(res, r.code, r.body); }
-      const s = freshSession();
+      const s = activeSession();
       if (!s || body?.session !== s.id) return sendJson(res, 404, { error: 'unknown session' });
       dropSession(s);
       return sendJson(res, 200, { ok: true });

@@ -21,26 +21,39 @@ function api(method, p, { body, token = TOKEN, raw } = {}) {
   });
 }
 
-before(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-recv-'));
-  const hash = execFileSync(process.execPath, [RECEIVER, '--hash', TOKEN], { encoding: 'utf8' }).trim();
-  const hashFile = path.join(os.tmpdir(), `dk-hash-${process.pid}`);
-  fs.writeFileSync(hashFile, hash + '\n');
-  child = spawn(process.execPath, [RECEIVER], {
-    env: { ...process.env, DOCKLETS_ROOT: root, DOCKLETS_RECEIVER_PORT: '0',
-      DOCKLETS_SYNC_TOKEN_HASH_FILE: hashFile,
-      DOCKLETS_SYNC_MAX_BYTES: '1000000', DOCKLETS_SYNC_MAX_FILE_BYTES: '500000' },
+const sha = (s) => createHash('sha256').update(s).digest('hex');
+const hashOf = (token) => execFileSync(process.execPath, [RECEIVER, '--hash', token], { encoding: 'utf8' }).trim();
+let tmpN = 0;
+const tmpFile = (content) => {
+  const p = path.join(os.tmpdir(), `dk-hash-${process.pid}-${tmpN++}`);
+  fs.writeFileSync(p, content);
+  return p;
+};
+
+// Spawns a receiver on a free port and resolves its base URL from the
+// listen line; extra env overrides the defaults.
+async function spawnReceiver(env) {
+  const proc = spawn(process.execPath, [RECEIVER], {
+    env: { ...process.env, DOCKLETS_RECEIVER_PORT: '0',
+      DOCKLETS_SYNC_MAX_BYTES: '1000000', DOCKLETS_SYNC_MAX_FILE_BYTES: '500000', ...env },
   });
-  base = await new Promise((resolve, reject) => {
+  const url = await new Promise((resolve, reject) => {
     let out = '';
-    child.stdout.on('data', (d) => {
+    proc.stdout.on('data', (d) => {
       out += d;
       const m = out.match(/receiver listening on (http:\/\/[^\s]+)/);
       if (m) resolve(m[1]);
     });
-    child.on('exit', (c) => reject(new Error(`receiver exited ${c}: ${out}`)));
+    proc.on('exit', (c) => reject(new Error(`receiver exited ${c}: ${out}`)));
     setTimeout(() => reject(new Error(`no listen line: ${out}`)), 5000);
   });
+  return { proc, url };
+}
+
+before(async () => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-recv-'));
+  const hashFile = tmpFile(hashOf(TOKEN) + '\n');
+  ({ proc: child, url: base } = await spawnReceiver({ DOCKLETS_ROOT: root, DOCKLETS_SYNC_TOKEN_HASH_FILE: hashFile }));
 });
 after(() => child.kill());
 
@@ -148,4 +161,81 @@ test('finish with missing uploads is refused; abort discards staging', async () 
   assert.equal((await api('POST', '/sync/abort', { body: { session } })).status, 200);
   assert.equal(fs.readdirSync(root).filter((e) => e.startsWith('.staging-')).length, 0);
   assert.ok(fs.existsSync(path.join(root, 'only.txt')), 'abort touched the live tree');
+});
+
+test('manifest and file reads describe the live tree, never dot-entries or status', async () => {
+  await fullSync([
+    { path: 'site/index.html', data: '<h1>hi</h1>' },
+    { path: 'note.txt', data: 'hosted note' },
+  ]);
+  fs.writeFileSync(path.join(root, '.hidden'), 'h');
+  const m = await api('GET', '/sync/manifest');
+  assert.equal(m.status, 200);
+  assert.deepEqual(await m.json(), { files: [
+    { path: 'note.txt', size: 11, sha256: sha('hosted note') },
+    { path: 'site/index.html', size: 11, sha256: sha('<h1>hi</h1>') },
+  ] });
+
+  const f = await api('GET', '/sync/file?path=note.txt');
+  assert.equal(f.status, 200);
+  assert.equal(f.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(f.headers.get('content-length'), '11');
+  assert.equal(await f.text(), 'hosted note');
+  for (const p of ['.hidden', 'status/index.html', '../x', '']) {
+    assert.equal((await api('GET', `/sync/file?path=${encodeURIComponent(p)}`)).status, 400, p);
+  }
+  for (const p of ['site', 'missing.txt']) {
+    assert.equal((await api('GET', `/sync/file?path=${encodeURIComponent(p)}`)).status, 404, p);
+  }
+  assert.equal((await fetch(base + '/sync/manifest')).status, 401);
+  assert.equal((await fetch(base + '/sync/file?path=note.txt')).status, 401);
+});
+
+test('two concurrent starts yield one session and one 409', async () => {
+  const files = [
+    { path: 'note.txt', size: 11, sha256: sha('hosted note') },
+    { path: 'site/index.html', size: 11, sha256: sha('<h1>hi</h1>') },
+    { path: 'new.txt', size: 3, sha256: sha('new') },
+  ];
+  const [a, b] = await Promise.all([
+    api('POST', '/sync/start', { body: { files } }),
+    api('POST', '/sync/start', { body: { files } }),
+  ]);
+  assert.deepEqual([a.status, b.status].sort(), [200, 409]);
+  const { session, need } = await (a.status === 200 ? a : b).json();
+  assert.deepEqual(need, ['new.txt']);
+  assert.equal((await api('PUT', `/sync/file?session=${session}&path=new.txt`, { raw: 'new' })).status, 200);
+  assert.equal((await api('POST', '/sync/finish', { body: { session } })).status, 200);
+});
+
+test('extra hash files: any line of any readable file authorizes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-recv2-'));
+  const primary = tmpFile(`${hashOf(TOKEN)}\n\n  ${hashOf('second-in-primary')}  \n`);
+  const extra = tmpFile(hashOf('extra-token') + '\n');
+  const missing = path.join(os.tmpdir(), `dk-hash-missing-${process.pid}`);
+  const { proc, url } = await spawnReceiver({
+    DOCKLETS_ROOT: dir, DOCKLETS_SYNC_TOKEN_HASH_FILE: primary,
+    DOCKLETS_SYNC_TOKEN_HASH_FILES: `${missing}:${extra}`,
+  });
+  try {
+    const status = async (token) => (await fetch(url + '/sync/manifest', {
+      headers: { authorization: `Bearer ${token}` } })).status;
+    assert.equal(await status(TOKEN), 200);
+    assert.equal(await status('second-in-primary'), 200);
+    assert.equal(await status('extra-token'), 200);
+    assert.equal(await status('nope'), 401);
+  } finally { proc.kill(); }
+});
+
+test('an unreadable primary hash file fails closed even with extras', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-recv3-'));
+  const extra = tmpFile(hashOf('extra-token') + '\n');
+  const { proc, url } = await spawnReceiver({
+    DOCKLETS_ROOT: dir, DOCKLETS_SYNC_TOKEN_HASH_FILE: path.join(dir, 'absent'),
+    DOCKLETS_SYNC_TOKEN_HASH_FILES: extra,
+  });
+  try {
+    const r = await fetch(url + '/sync/manifest', { headers: { authorization: 'Bearer extra-token' } });
+    assert.equal(r.status, 503);
+  } finally { proc.kill(); }
 });
