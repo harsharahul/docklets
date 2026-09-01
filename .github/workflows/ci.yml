@@ -327,6 +327,10 @@ jobs:
           TOKEN="dk-ci-sync-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
           echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
           node bin/receiver.mjs --hash "$TOKEN" > /tmp/sync-hash
+          # a second writer holds its own token in an extra hash file
+          AGENT_TOKEN="dk-ci-agent-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          echo "AGENT_TOKEN=$AGENT_TOKEN" >> "$GITHUB_ENV"
+          node bin/receiver.mjs --hash "$AGENT_TOKEN" > /tmp/agent-hash
           # frps on the runner is the edge; the runtime container dials it.
           FRP_VERSION=0.71.0
           SHA=84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716
@@ -341,9 +345,11 @@ jobs:
             -p 127.0.0.1:19000:9000 \
             -v "$HR":/folder \
             -v /tmp/sync-hash:/etc/docklets/sync-hash:ro \
+            -v /tmp/agent-hash:/etc/docklets/agent-hash:ro \
             -v /tmp/connector.env:/etc/docklets/connector.env:ro \
             -e DOCKLETS_ROOT=/folder \
             -e DOCKLETS_SYNC_TOKEN_HASH_FILE=/etc/docklets/sync-hash \
+            -e DOCKLETS_SYNC_TOKEN_HASH_FILES=/etc/docklets/agent-hash \
             dk-ci-hosted
           mkdir -p "$HR/.gateway/routes"
           printf '# placeholder so the routes glob always matches\n' > "$HR/.gateway/routes/00-placeholder.caddy"
@@ -371,6 +377,14 @@ jobs:
           curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/hello-static/ | grep -q "It works" \
             || { echo "::error::synced content not served through the tunnel"; docker logs dk-ci-rt; cat /tmp/frps.log; exit 1; }
           curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/note.txt | grep -q "hosted note"
+          # the second writer's token reads the live tree back through the new endpoints
+          curl -sf -H "Authorization: Bearer $AGENT_TOKEN" http://127.0.0.1:19000/sync/manifest \
+            | grep -q '"hello-static/index.html"' \
+            || { echo "::error::manifest missing the synced file"; exit 1; }
+          [ "$(curl -sf -H "Authorization: Bearer $AGENT_TOKEN" 'http://127.0.0.1:19000/sync/file?path=note.txt')" = "hosted note" ] \
+            || { echo "::error::file read did not return the synced bytes"; exit 1; }
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $AGENT_TOKEN" 'http://127.0.0.1:19000/sync/file?path=.status.json')" = "400" ] \
+            || { echo "::error::dot-entry was readable"; exit 1; }
           # the seeded dashboard answers, and the status feed marks app folders pending
           curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/status/ | grep -q docklets
           mkdir "$L/my-app"
