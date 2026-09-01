@@ -29,6 +29,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Sync receiver: token hashes verify in both supported encodings
   (base64url and hex), so managed control planes can share one stored
   hash with the receiver.
+- Published container image: every main push publishes the multi-arch
+  image to `ghcr.io/harsharahul/docklets` (`:main` and `:sha-<commit>`).
 
 - Not-found page: a request for a path nothing serves answers with a
   readable page naming the missing path instead of an empty response, in
