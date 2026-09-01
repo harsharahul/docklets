@@ -323,6 +323,16 @@ the managed edge run by the docklets project, currently in invite-only
 preview. Your subdomain, your token, your data at home. The traffic path is
 explained in [How docklets works](https://harsharahul.com/how-docklets-works/).
 
+## Sync and containers
+
+`bin/sync.mjs` mirrors a folder to another machine running the sync
+receiver: sha256 manifest diff, only changes upload, deletions propagate,
+and generated state (`.data`, dot-entries) never travels. The repo's
+`Dockerfile` packs the deployer, receiver, and connector into one image
+that pairs with a stock caddy container, so a NAS, a VPS, or a pod can
+serve a folder you sync from anywhere. Details:
+[docs/sync.md](docs/sync.md) and [docs/container.md](docs/container.md).
+
 ## Security model
 
 Read [SECURITY.md](SECURITY.md) for the full threat model, verified boundary

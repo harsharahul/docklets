@@ -112,6 +112,30 @@ the system CA bundle, or against `TUNNEL_CA_FILE` when set, and refuses to
 connect if verification fails. CI asserts both the refusal without trust and
 end-to-end traffic through a TLS-terminating proxy.
 
+## Sync receiver
+
+The receiver (`bin/receiver.mjs`) is an opt-in write surface scoped to one
+folder, and mirror deletion is its contract, not a defect: whoever holds the
+sync token can make the folder match theirs, including making it emptier.
+That makes the sync token a write credential, deliberately separate from the
+tunnel token (an ingress credential); leaking one never grants the other's
+power. The token is stored only as an scrypt hash; the plaintext exists
+client-side and in flight. Every request is verified against the hash file
+(re-read per request, so rotation is a file write), and an unreadable hash
+file fails closed.
+
+What a sync can write is bounded: forward-slash relative paths only, no
+dot-entries at any depth (the deployer's state, app data, and lock files are
+unreachable), no symlinks, no path traversal, and the reserved `status`
+folder is never written or deleted. Uploads land in a hidden staging area
+and are verified byte for byte against their declared sha256 before the
+commit step touches the live tree; during that brief step the receiver
+holds `.sync-lock`, which the deployer honors, so a half-applied sync is
+never deployed. Total, per-file, and file-count caps apply.
+
+The receiver binds 127.0.0.1 by default. Bind it wider only behind a
+private network boundary or an authenticating proxy.
+
 ## Known limitations
 
 1. **Apps have outbound internet.** Needed for `npm install` and for apps that
