@@ -323,6 +323,12 @@ the managed edge run by the docklets project, currently in invite-only
 preview. Your subdomain, your token, your data at home. The traffic path is
 explained in [How docklets works](https://harsharahul.com/how-docklets-works/).
 
+docklets.dev also works as an MCP connector: add `https://docklets.dev/mcp`
+in Claude, ChatGPT, Claude Code, Codex, or VS Code, sign in once, and ask for
+a docklet. The agent publishes straight to your hosted name through the same
+sync receiver, with no folder, CLI, or token on your side. Steps for each app
+are at [docklets.dev/connect](https://docklets.dev/connect).
+
 ## Sync and containers
 
 `bin/sync.mjs` mirrors a folder to another machine running the sync
