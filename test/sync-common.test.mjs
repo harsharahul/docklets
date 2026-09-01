@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,4 +42,16 @@ test('scrypt hash round-trips and rejects a wrong token', () => {
   assert.ok(scryptVerify('tok-secret', h));
   assert.equal(scryptVerify('tok-wrong', h), false);
   assert.equal(scryptVerify('tok-secret', 'garbage'), false);
+});
+
+test('scryptVerify accepts the hex hash encoding used by managed control planes', () => {
+  // scrypt$N$salt$key with hex salt (32 chars) and hex key (64 chars),
+  // N=16384 r=8 p=1 keylen 32: the format docklets.dev stores.
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync('tok-hex', salt, 32, { N: 16384, r: 8, p: 1 });
+  const hexStored = `scrypt$16384$${salt.toString('hex')}$${key.toString('hex')}`;
+  assert.ok(scryptVerify('tok-hex', hexStored));
+  assert.equal(scryptVerify('tok-wrong', hexStored), false);
+  // b64url format still verifies (round trip through our own mint)
+  assert.ok(scryptVerify('tok-b64', scryptHash('tok-b64')));
 });

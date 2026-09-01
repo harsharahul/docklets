@@ -1,5 +1,8 @@
 # Running docklets in a container
 
+A prebuilt multi-arch image is published as
+`ghcr.io/harsharahul/docklets:main` (also tagged `sha-<commit>`).
+
 The repo's `Dockerfile` builds a single image with the node-side stack:
 the deployer, the sync receiver, and the tunnel connector, supervised by
 tini. The frp client is baked in at build time, checksum-verified, so
