@@ -200,11 +200,14 @@ DOCKLETS_ROOT=~/docklets node bin/deployer.mjs     # deployer (--once for a sing
 
 Going public is two paths as well. Bring your own front door: point any
 reverse proxy or tunnel you already run at the gateway port, done. Or use a
-managed edge: [docklets.dev](https://docklets.dev)'s dashboard hands you a
-single Terminal command that writes `~/.config/docklets/connector.env`,
-locks its permissions, and restarts the connector service when one exists;
-on a first-time setup, run the wizard once more and it manages the
-connector from then on.
+managed edge: claim a name on [docklets.dev](https://docklets.dev) and it is
+hosted there right away; publish to it from an AI connector or sync your
+folder with the one command the dashboard gives you. A tunnel from
+docklets.dev to your own machine is available on request: the dashboard then
+hands you a single Terminal command that writes
+`~/.config/docklets/connector.env`, locks its permissions, and restarts the
+connector service when one exists; on a first-time setup, run the wizard
+once more and it manages the connector from then on.
 
 ## The manifest
 
@@ -320,8 +323,10 @@ already run or rent: a minimal `frps.toml` for a VPS is in
 
 Or skip running a server entirely: [docklets.dev](https://docklets.dev) is
 the managed edge run by the docklets project, currently in invite-only
-preview. Your subdomain, your token, your data at home. The traffic path is
-explained in [How docklets works](https://harsharahul.com/how-docklets-works/).
+preview. Names are hosted on docklets.dev by default, so your site serves
+while your machine is off; a tunnel to your own machine, with your data
+staying at home, is available on request. The traffic path is explained in
+[How docklets works](https://harsharahul.com/how-docklets-works/).
 
 docklets.dev also works as an MCP connector: add `https://docklets.dev/mcp`
 in Claude, ChatGPT, Claude Code, Codex, or VS Code, sign in once, and ask for
