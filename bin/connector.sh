@@ -96,6 +96,13 @@ ensure_frpc() {
   echo "$frpc"
 }
 
+# Pre-fetch the tunnel client and exit: lets images bake the verified binary
+# at build time so container start needs no network fetch.
+if [ "${1:-}" = "--fetch-only" ]; then
+  ensure_frpc "$(platform)"
+  exit 0
+fi
+
 # ---- config ------------------------------------------------------------------
 if [ ! -f "$CONF" ]; then
   mkdir -p "$CONF_DIR"; chmod 700 "$CONF_DIR"

@@ -8,6 +8,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Folder sync (`bin/sync.mjs` + `bin/receiver.mjs`): mirror a local folder
+  to another machine over HTTPS. The client fingerprints files with sha256
+  and uploads only changes; the receiver stages uploads, verifies every
+  byte against the declared digest, and applies the mirror atomically
+  behind a lock the deployer honors. Auth is a bearer token stored only as
+  an scrypt hash. Documented in `docs/sync.md`; unit tests cover the
+  protocol and CI runs a full round-trip.
+- Container image (`Dockerfile`): the deployer, sync receiver, and tunnel
+  connector in one image with the frp client baked in checksum-verified.
+  Pairs with a stock caddy container serving the same folder. Documented
+  in `docs/container.md`; CI builds the image and serves synced content
+  through a tunnel end to end.
+- Deployer app-runner modes (`DOCKLETS_DRIVER`): `docker` (the default,
+  unchanged) or `none`, which publishes the status feed without running
+  apps, for deployments without a docker socket. App folders show as
+  `pending` on the dashboard in `none` mode.
+- Connector `--fetch-only`: download and verify the tunnel client, then
+  exit; lets images bake the binary at build time.
+
 - Not-found page: a request for a path nothing serves answers with a
   readable page naming the missing path instead of an empty response, in
   light or dark to match the visitor. An asset root's own `404.html`

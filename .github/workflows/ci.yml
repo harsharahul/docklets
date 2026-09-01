@@ -23,7 +23,9 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-          shellcheck -S warning bin/serve.sh bin/connector.sh install/*.sh
+          shellcheck -S warning bin/serve.sh bin/connector.sh bin/container-run.sh install/*.sh
+      - name: Unit tests
+        run: npm test
 
   smoke:
     name: End-to-end smoke test
@@ -306,3 +308,90 @@ jobs:
           docker rm -f dk-ci-gw 2>/dev/null || true
           docker ps -aq --filter label=docklet | xargs -r docker rm -f
           docker network rm dk-ci 2>/dev/null || true
+
+  hosted:
+    name: Hosted stack end to end
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Build the image
+        run: docker build -t dk-ci-hosted .
+      - name: Start the simulated pod (runtime + caddy sharing localhost)
+        run: |
+          HR="$(mktemp -d)" && chmod 777 "$HR"
+          echo "HR=$HR" >> "$GITHUB_ENV"
+          TOKEN="dk-ci-sync-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          node bin/receiver.mjs --hash "$TOKEN" > /tmp/sync-hash
+          # frps on the runner is the edge; the runtime container dials it.
+          FRP_VERSION=0.71.0
+          SHA=84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716
+          curl -fsSL -o /tmp/frp.tgz "https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz"
+          echo "$SHA  /tmp/frp.tgz" | sha256sum -c -
+          tar -xzf /tmp/frp.tgz -C /tmp "frp_${FRP_VERSION}_linux_amd64/frps"
+          printf 'bindPort = 7000\nvhostHTTPPort = 8090\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > /tmp/frps.toml
+          "/tmp/frp_${FRP_VERSION}_linux_amd64/frps" -c /tmp/frps.toml > /tmp/frps.log 2>&1 &
+          printf 'TUNNEL_SERVER=dk-ci-host\nTUNNEL_PORT=7000\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=hosted-ci\nLOCAL_PORT=8080\n' > /tmp/connector.env
+          docker run -d --name dk-ci-rt \
+            --add-host dk-ci-host:host-gateway \
+            -p 127.0.0.1:19000:9000 \
+            -v "$HR":/folder \
+            -v /tmp/sync-hash:/etc/docklets/sync-hash:ro \
+            -v /tmp/connector.env:/etc/docklets/connector.env:ro \
+            -e DOCKLETS_ROOT=/folder \
+            -e DOCKLETS_SYNC_TOKEN_HASH_FILE=/etc/docklets/sync-hash \
+            dk-ci-hosted
+          mkdir -p "$HR/.gateway/routes"
+          printf '# placeholder so the routes glob always matches\n' > "$HR/.gateway/routes/00-placeholder.caddy"
+          docker run -d --name dk-ci-pod-gw --network container:dk-ci-rt \
+            -v "$HR":/srv:ro \
+            -v "$PWD/gateway/Caddyfile":/etc/caddy/Caddyfile:ro \
+            -v "$HR/.gateway/routes":/etc/caddy/routes:ro \
+            --read-only --tmpfs /tmp --tmpfs /data --tmpfs /config \
+            caddy:2.11-alpine
+          for i in $(seq 1 20); do
+            curl -sf -o /dev/null http://127.0.0.1:19000/healthz && break; sleep 1
+          done
+          curl -sf http://127.0.0.1:19000/healthz || { docker logs dk-ci-rt; exit 1; }
+      - name: Sync a folder and serve it through the tunnel
+        run: |
+          L="$(mktemp -d)"
+          cp -R examples/hello-static "$L/hello-static"
+          printf 'hosted note\n' > "$L/note.txt"
+          DOCKLETS_SYNC_URL=http://127.0.0.1:19000 DOCKLETS_SYNC_TOKEN="$TOKEN" \
+            node bin/sync.mjs "$L"
+          for i in $(seq 1 20); do
+            curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/hello-static/ | grep -q "It works" && break
+            sleep 2
+          done
+          curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/hello-static/ | grep -q "It works" \
+            || { echo "::error::synced content not served through the tunnel"; docker logs dk-ci-rt; cat /tmp/frps.log; exit 1; }
+          curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/note.txt | grep -q "hosted note"
+          # the seeded dashboard answers, and the status feed marks app folders pending
+          curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/status/ | grep -q docklets
+          mkdir "$L/my-app"
+          printf '{"runtime":"node","entry":"s.js","port":3000}' > "$L/my-app/app.json"
+          printf '// app\n' > "$L/my-app/s.js"
+          DOCKLETS_SYNC_URL=http://127.0.0.1:19000 DOCKLETS_SYNC_TOKEN="$TOKEN" \
+            node bin/sync.mjs "$L"
+          for i in $(seq 1 15); do
+            curl -s -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/.status.json | grep -q '"pending"' && break
+            sleep 2
+          done
+          curl -s -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/.status.json | grep -q '"pending"' \
+            || { echo "::error::app folder not reported pending"; exit 1; }
+          # mirror delete propagates
+          rm "$L/note.txt"
+          DOCKLETS_SYNC_URL=http://127.0.0.1:19000 DOCKLETS_SYNC_TOKEN="$TOKEN" \
+            node bin/sync.mjs "$L"
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: hosted-ci.docklets.test' http://127.0.0.1:8090/note.txt)" = "404" ] \
+            || { echo "::error::deleted file still served"; exit 1; }
+      - name: Teardown
+        if: always()
+        run: |
+          docker rm -f dk-ci-pod-gw dk-ci-rt 2>/dev/null || true
+          pkill -f 'frps -c /tmp/frps.toml' || true

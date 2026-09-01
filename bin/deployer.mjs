@@ -14,6 +14,7 @@
  *   DOCKLETS_GATEWAY   gateway container name          (default: docklets-gateway)
  *   DOCKLETS_PREFIX    app container name prefix       (default: docklet-)
  *   DOCKLETS_POLL_MS   poll interval                   (default: 7000)
+ *   DOCKLETS_DRIVER    app runner: docker | none (status feed only)  (default: docker)
  *   DOCKLETS_MEMORY    per-app memory cap              (default: 512m)
  *   DOCKLETS_PIDS      per-app pid cap                 (default: 256)
  *
@@ -54,6 +55,11 @@ const MEMORY = process.env.DOCKLETS_MEMORY || '512m';
 const PIDS = process.env.DOCKLETS_PIDS || '256';
 const ONCE = process.argv.includes('--once');
 const ADMIN_PORT = Number(process.env.DOCKLETS_ADMIN_PORT || 0);
+const DRIVER = process.env.DOCKLETS_DRIVER || 'docker';
+if (!['docker', 'none'].includes(DRIVER)) {
+  console.error(`DOCKLETS_DRIVER must be "docker" or "none", got "${DRIVER}"`);
+  process.exit(1);
+}
 
 const ROUTES = path.join(ROOT, '.gateway', 'routes');
 const DATA = path.join(ROOT, '.data');
@@ -209,6 +215,13 @@ function isPaused(slug) {
   return fs.existsSync(path.join(ROOT, slug, 'app.json.paused'));
 }
 
+/** A sync session holds this lock while it rearranges the tree; converge
+ *  waits it out. A stale lock (crashed session) is ignored after 10 minutes. */
+function syncLocked() {
+  try { return Date.now() - fs.statSync(path.join(ROOT, '.sync-lock')).mtimeMs < 600_000; }
+  catch { return false; }
+}
+
 /**
  * Public status feed at <root>/.status.json, written atomically each pass.
  * Served by the gateway like any file, so it carries ONLY what the public
@@ -221,7 +234,8 @@ function writeStatus(desired, running) {
     if (!e.isDirectory() || !SLUG_RE.test(e.name)) continue;
     const slug = e.name;
     if (desired.has(slug)) {
-      status.apps.push({ slug, state: running.get(slug)?.state === 'running' ? 'running' : (running.get(slug)?.state ?? 'starting') });
+      status.apps.push({ slug, state: DRIVER === 'none' ? 'pending'
+        : running.get(slug)?.state === 'running' ? 'running' : (running.get(slug)?.state ?? 'starting') });
     } else if (isPaused(slug)) {
       status.apps.push({ slug, state: 'paused' });
     } else {
@@ -234,7 +248,13 @@ function writeStatus(desired, running) {
 }
 
 function converge() {
+  if (syncLocked()) { log('sync in progress; skipping converge'); return; }
   const desired = desiredApps();
+  if (DRIVER === 'none') {
+    // No app runner on this deployment: publish what exists and stop there.
+    writeStatus(desired, new Map());
+    return;
+  }
   const running = runningApps();
   let routesChanged = false;
 
@@ -405,7 +425,7 @@ fs.mkdirSync(ROUTES, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
 const placeholder = path.join(ROUTES, '00-placeholder.caddy');
 if (!fs.existsSync(placeholder)) fs.writeFileSync(placeholder, '# placeholder so the routes glob always matches\n');
-dockerQuiet(['network', 'create', NET]);
+if (DRIVER === 'docker') dockerQuiet(['network', 'create', NET]);
 
 log(`docklets deployer starting; root=${ROOT} net=${NET} gateway=${GATEWAY}${ONCE ? ' (single pass)' : ''}`);
 if (ADMIN_PORT) startAdmin();
