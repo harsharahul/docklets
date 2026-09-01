@@ -23,7 +23,9 @@ jobs:
       - name: Shellcheck
         run: |
           sudo apt-get update -q && sudo apt-get install -y -q shellcheck
-          shellcheck -S warning bin/serve.sh bin/connector.sh install/*.sh
+          shellcheck -S warning bin/serve.sh bin/connector.sh bin/container-run.sh install/*.sh
+      - name: Unit tests
+        run: npm test
 
   smoke:
     name: End-to-end smoke test
