@@ -92,7 +92,10 @@ say "  Hand it to your AI:  cd $ROOT && claude   (or codex; instructions are in 
 if [ -f "$CONNECTOR_ENV" ]; then
   say "  Public address:      your docklets.dev name goes live as the connector signs in."
 else
-  say "  Go public (opt-in):  sign in at https://docklets.dev, claim your name, use its"
-  say "                       'Copy as Terminal command' button, then re-run this wizard:"
+  say "  Go public (opt-in):  sign in at https://docklets.dev and claim your name. Publish"
+  say "                       to it three ways: sync this folder (the dashboard gives you"
+  say "                       the command), connect Claude or ChatGPT, or ask for a tunnel"
+  say "                       from this machine and re-run this wizard with the Terminal"
+  say "                       command the dashboard then shows:"
   say "                       curl -fsSL https://docklets.dev/install | bash"
 fi
