@@ -75,6 +75,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - README: docklets.dev as an MCP connector (Claude, ChatGPT, Claude Code,
   Codex, VS Code), pointing at docklets.dev/connect.
 
+### Changed
+
+- README, install wizard, and docs/tunnel.md describe the three ways to
+  publish a docklets.dev name: from your own machine through the tunnel,
+  hosted as a synced copy, or straight from an AI connector. Names are
+  hosted on claim; a tunnel is granted per name on request.
+
 ### Fixed
 
 - Receiver: two `POST /sync/start` requests that overlapped while the

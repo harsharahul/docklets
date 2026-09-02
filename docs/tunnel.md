@@ -6,6 +6,11 @@ machine. The connector dials out (it works behind NAT and CGNAT; no inbound
 ports are opened on your network) and forwards edge traffic to your local
 gateway.
 
+On docklets.dev a tunnel is one of three ways to publish a name (the others
+are a hosted, synced copy of your folder and publishing straight from an AI
+connector) and is granted per name on request. Against an frps edge you run
+yourself, everything below applies unchanged.
+
 ## Security properties
 
 - The connector forwards to the gateway port only. It refuses to tunnel the
