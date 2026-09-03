@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Connector: the generated tunnel client config keeps frp's application
+  heartbeat on (`transport.heartbeatInterval` 30s, timeout 90s). frp turns
+  it off under tcpMux, which left a managed edge's Ping hook silent, so a
+  name's "last seen" never advanced. A connector test runs the script
+  against a stand-in tunnel client and checks the generated config.
+
 ### Added
 
 - Folder sync (`bin/sync.mjs` + `bin/receiver.mjs`): mirror a local folder
