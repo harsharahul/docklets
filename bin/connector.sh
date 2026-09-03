@@ -202,6 +202,11 @@ serverAddr = "$TUNNEL_SERVER"
 serverPort = $TUNNEL_PORT
 $AUTH_LINES
 $TRANSPORT_LINES
+# frp turns its own heartbeat off when tcpMux is on (the mux keeps the link
+# alive), but the edge's Ping hook is how a managed edge learns this tunnel
+# is still here, so keep the application heartbeat on at frp's own cadence.
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
 loginFailExit = false
 
 [[proxies]]
