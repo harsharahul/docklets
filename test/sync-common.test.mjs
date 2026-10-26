@@ -13,13 +13,13 @@ test('validRelPath accepts normal paths and rejects escapes and reserved names',
   assert.ok(validRelPath('hello-static/index.html'));
   assert.ok(validRelPath('My Notes/reading list.md'));
   for (const bad of ['', '/abs', 'a/../b', '..', './x', 'a/.hidden/x', '.env',
-    'a\\b', 'a/', 'a//b', 'status/index.html', 'status', 'x'.repeat(1025),
+    'a\\b', 'a/', 'a//b', 'status/index.html', 'status', 'lost+found/x', 'x'.repeat(1025),
     'a\tb', 'a\nb']) {
     assert.equal(validRelPath(bad), false, `accepted: ${JSON.stringify(bad)}`);
   }
 });
 
-test('walkManifest lists regular files, skips dot-entries, symlinks, and status', async () => {
+test('walkManifest lists regular files, skips dot-entries, symlinks, status, and lost+found', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-walk-'));
   fs.mkdirSync(path.join(root, 'notes'));
   fs.writeFileSync(path.join(root, 'index.html'), 'hello');
@@ -29,6 +29,8 @@ test('walkManifest lists regular files, skips dot-entries, symlinks, and status'
   fs.writeFileSync(path.join(root, '.status.json'), '{}');
   fs.mkdirSync(path.join(root, 'status'));
   fs.writeFileSync(path.join(root, 'status', 'index.html'), 'dash');
+  fs.mkdirSync(path.join(root, 'lost+found'));
+  fs.writeFileSync(path.join(root, 'lost+found', '#12'), 'orphan');
   fs.symlinkSync('/etc/hosts', path.join(root, 'link'));
   const m = await walkManifest(root);
   assert.deepEqual(m.map((f) => f.path), ['index.html', 'notes/a.md']);

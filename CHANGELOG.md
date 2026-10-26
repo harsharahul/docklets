@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Sync receiver: a top-level `lost+found` is reserved like `status`, so it
+  is never walked, listed, written, or pruned. When the receiver's folder
+  is a volume's root, fsck can recreate that folder readable by root only
+  after the volume is re-attached, and every manifest, start, and finish
+  then failed with a 500.
 - Connector: the generated tunnel client config keeps frp's application
   heartbeat on (`transport.heartbeatInterval` 30s, timeout 90s). frp turns
   it off under tcpMux, which left a managed edge's Ping hook silent, so a

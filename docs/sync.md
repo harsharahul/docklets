@@ -18,6 +18,9 @@ direction:
 - symlinks: skipped by the client, refused by the receiver.
 - the top-level `status` folder: reserved for the dashboard, which the
   receiver seeds on first start.
+- the top-level `lost+found` folder: when the receiver's folder is a
+  volume's root, the filesystem owns it, and fsck may recreate it readable
+  by root only.
 
 A `404.html` at the folder root syncs like any other file, so a custom
 not-found page works on the far side.
@@ -101,14 +104,14 @@ Six endpoints, all JSON except file bodies. Every request except
    changes nothing.
 5. `GET /sync/manifest` answers `{"files":[{"path","size","sha256"}, ...]}`
    for the live tree, by the same rules as a client manifest (regular files
-   only, sorted by path, dot-entries and the `status` folder excluded). A
+   only, sorted by path, dot-entries and the reserved folders excluded). A
    client that wants to change a few files fetches this, edits it, and
    runs a normal session with the result, so a partial update never
    deletes what it did not mean to.
 6. `GET /sync/file?path=P` answers the raw bytes of one file as
    `application/octet-stream` with its `content-length`; 400 for a path
-   the sync would never write (dot-entries, `status`, traversal), 404 when
-   the path is not a regular file.
+   the sync would never write (dot-entries, reserved folders, traversal),
+   404 when the path is not a regular file.
 
 Errors are explicit: 401 wrong token, 400 invalid manifest entry or path,
 404 no such file, 409 concurrent session or missing uploads, 413 over a
