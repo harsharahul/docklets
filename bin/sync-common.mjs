@@ -1,7 +1,7 @@
 /**
  * Shared helpers for the docklets sync protocol: what a synced folder
- * contains (regular files only, never dot-entries, never symlinks, never the
- * reserved status dashboard), how files are fingerprinted (sha256), and how
+ * contains (regular files only, never dot-entries, never symlinks, never a
+ * reserved top-level name), how files are fingerprinted (sha256), and how
  * the sync token is stored (scrypt hash; the plaintext exists only client
  * side and in flight).
  */
@@ -12,6 +12,11 @@ import path from 'node:path';
 const SCRYPT_N = 16384, SCRYPT_R = 8, SCRYPT_P = 1, KEY_LEN = 32;
 const MAX_PATH = 1024;
 
+// Top-level names a synced folder never contains: the seeded status
+// dashboard, and the filesystem's lost+found (a volume mounted as the root
+// has one, and fsck recreates it root-only when the volume is re-attached).
+export const RESERVED_TOP = new Set(['status', 'lost+found']);
+
 export function validRelPath(p) {
   if (typeof p !== 'string' || !p || p.length > MAX_PATH) return false;
   if (p.includes('\\') || /[\x00-\x1f\x7f]/.test(p)) return false;
@@ -19,7 +24,7 @@ export function validRelPath(p) {
   for (const part of parts) {
     if (!part || part === '..' || part.startsWith('.')) return false;
   }
-  if (parts[0] === 'status') return false; // reserved: the seeded dashboard
+  if (RESERVED_TOP.has(parts[0])) return false;
   return true;
 }
 
@@ -39,7 +44,7 @@ export async function walkManifest(root) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name.startsWith('.')) continue;
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (!rel && e.name === 'status') continue;
+      if (!rel && RESERVED_TOP.has(e.name)) continue;
       const p = path.join(dir, e.name);
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) { await walk(p, r); continue; }

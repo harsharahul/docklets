@@ -129,9 +129,10 @@ and a missing one is skipped, never treated as an open door.
 
 What a sync can write is bounded: forward-slash relative paths only, no
 dot-entries at any depth (the deployer's state, app data, and lock files are
-unreachable), no symlinks, no path traversal, and the reserved `status`
-folder is never written or deleted. Uploads land in a hidden staging area
-and are verified byte for byte against their declared sha256 before the
+unreachable), no symlinks, no path traversal, and the reserved top-level
+`status` and `lost+found` folders are never written or deleted. Uploads
+land in a hidden staging area and are verified byte for byte against their
+declared sha256 before the
 commit step touches the live tree; during that brief step the receiver
 holds `.sync-lock`, which the deployer honors, so a half-applied sync is
 never deployed. Total, per-file, and file-count caps apply. Only one
@@ -139,7 +140,7 @@ session exists at a time: the slot is reserved before the receiver starts
 hashing files already on disk, so two overlapping starts cannot both
 proceed. The read endpoints (`/sync/manifest`, `/sync/file`) sit behind the
 same bearer check and refuse every path a sync would never write, so
-dot-entries and the status folder are never readable through them.
+dot-entries and the reserved folders are never readable through them.
 
 The receiver binds 127.0.0.1 by default. Bind it wider only behind a
 private network boundary or an authenticating proxy.

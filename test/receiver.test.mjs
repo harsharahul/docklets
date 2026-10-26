@@ -150,6 +150,27 @@ test('mirror delete never touches dot-entries or the status dashboard', async ()
   assert.ok(fs.existsSync(path.join(root, 'status', 'index.html')));
 });
 
+// A volume root carries the filesystem's lost+found, and fsck recreates it
+// root-only (0700) when a volume is re-attached: the receiver never reads,
+// lists, writes, or prunes it.
+test('lost+found at the root is never walked, listed, or pruned', async () => {
+  const lf = path.join(root, 'lost+found');
+  fs.mkdirSync(lf);
+  fs.chmodSync(lf, 0o000);
+  try {
+    const m = await api('GET', '/sync/manifest');
+    assert.equal(m.status, 200);
+    assert.ok(!(await m.json()).files.some((f) => f.path.startsWith('lost+found')));
+    await fullSync([{ path: 'only.txt', data: 'only' }]);
+    assert.ok(fs.existsSync(lf), 'finish pruned lost+found');
+    const bad = [{ path: 'lost+found/x', size: 1, sha256: 'a'.repeat(64) }];
+    assert.equal((await api('POST', '/sync/start', { body: { files: bad } })).status, 400);
+  } finally {
+    fs.chmodSync(lf, 0o755);
+    fs.rmSync(lf, { recursive: true, force: true });
+  }
+});
+
 test('finish with missing uploads is refused; abort discards staging', async () => {
   const start = await api('POST', '/sync/start', { body: { files: [
     { path: 'x.txt', size: 1, sha256: createHash('sha256').update('x').digest('hex') },

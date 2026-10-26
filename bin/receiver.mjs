@@ -22,8 +22,9 @@
  * change as the full mirror the protocol requires.
  *
  * What a synced folder can contain: regular files with forward-slash
- * relative paths. Dot-entries, symlinks, and the reserved status dashboard
- * are never written and never deleted (see sync-common.mjs).
+ * relative paths. Dot-entries, symlinks, and the reserved top-level names
+ * (the status dashboard, lost+found) are never read, written, or deleted
+ * (see sync-common.mjs).
  *
  * Usage:
  *   node receiver.mjs                 # serve (env below)
@@ -40,7 +41,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { validRelPath, hashFile, scryptHash, scryptVerify } from './sync-common.mjs';
+import { RESERVED_TOP, validRelPath, hashFile, scryptHash, scryptVerify } from './sync-common.mjs';
 
 if (process.argv[2] === '--hash') {
   const t = process.argv[3];
@@ -114,7 +115,7 @@ function liveFiles() {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (e.name.startsWith('.')) continue;
       const r = rel ? `${rel}/${e.name}` : e.name;
-      if (!rel && e.name === 'status') continue;
+      if (!rel && RESERVED_TOP.has(e.name)) continue;
       const p = path.join(dir, e.name);
       if (e.isSymbolicLink()) { out.push({ path: r, file: false }); continue; }
       if (e.isDirectory()) { walk(p, r); continue; }
@@ -285,7 +286,7 @@ function handleFinish(body) {
 
 function pruneEmptyDirs(dir, top = true) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (e.name.startsWith('.') || (top && e.name === 'status') || !e.isDirectory()) continue;
+    if (e.name.startsWith('.') || (top && RESERVED_TOP.has(e.name)) || !e.isDirectory()) continue;
     const p = path.join(dir, e.name);
     pruneEmptyDirs(p, false);
     try { fs.rmdirSync(p); } catch {} // fails while non-empty, which is the point
