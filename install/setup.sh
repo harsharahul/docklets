@@ -6,7 +6,7 @@
 #   curl -fsSL https://docklets.dev/install | bash
 #
 # Non-interactive use: set DOCKLETS_ROOT, DOCKLETS_PORT, DOCKLETS_SRC and
-# the wizard asks nothing.
+# DOCKLETS_AUTO_UPDATE (1 or 0) and the wizard asks nothing.
 set -euo pipefail
 
 REPO_URL="https://github.com/harsharahul/docklets"
@@ -49,10 +49,21 @@ if [ -z "$SRC" ]; then
   fi
 fi
 if [ ! -f "$SRC/bin/deployer.mjs" ]; then
-  say "Fetching docklets into $SRC ..."
+  # A new install starts on the newest release; install/update.sh moves it
+  # from release to release after that.
+  RELEASE="$(git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
+    | sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' \
+    | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1 || true)"
+  say "Fetching docklets ${RELEASE:-(main)} into $SRC ..."
   mkdir -p "$(dirname "$SRC")"
-  git clone --depth 1 "$REPO_URL" "$SRC"
-else
+  if [ -n "$RELEASE" ]; then
+    git clone -q --depth 1 --branch "$RELEASE" "$REPO_URL" "$SRC"
+  else
+    git clone -q --depth 1 "$REPO_URL" "$SRC"
+  fi
+elif git -C "$SRC" symbolic-ref -q HEAD >/dev/null 2>&1; then
+  # A checkout that follows a branch keeps following it; one on a release
+  # tag is updated by install/update.sh instead.
   git -C "$SRC" pull --ff-only >/dev/null 2>&1 || true
 fi
 
@@ -61,6 +72,17 @@ ROOT="${DOCKLETS_ROOT:-$(ask "Where should your docklets folder live" "$HOME/doc
 ROOT="${ROOT/#\~/$HOME}"
 PORT="${DOCKLETS_PORT:-$(ask "Local port for the gateway" "8080")}"
 case "$PORT" in (*[!0-9]*|'') fail "the port must be a number" ;; esac
+
+# ---- automatic updates (opt-in; the last answer is the default) ----
+if [ -z "${DOCKLETS_AUTO_UPDATE:-}" ]; then
+  PREV_AUTO="$(sed -n 's/^DOCKLETS_AUTO_UPDATE=//p' "$HOME/.config/docklets/install.env" 2>/dev/null)"
+  [ "$PREV_AUTO" = "1" ] && AUTO_DEFAULT=y || AUTO_DEFAULT=n
+  case "$(ask "Update docklets automatically each night (rolls back if it fails)? y/n" "$AUTO_DEFAULT")" in
+    [yY]*) DOCKLETS_AUTO_UPDATE=1 ;;
+    *)     DOCKLETS_AUTO_UPDATE=0 ;;
+  esac
+fi
+export DOCKLETS_AUTO_UPDATE
 
 # ---- tunnel mode is decided by the connector configuration ----
 CONNECTOR_ENV="$HOME/.config/docklets/connector.env"
@@ -74,6 +96,7 @@ say ""
 say "  folder:  $ROOT"
 say "  gateway: http://localhost:$PORT/"
 say "  tunnel:  $TUNNEL_STATE"
+if [ "$DOCKLETS_AUTO_UPDATE" = "1" ]; then say "  updates: automatic, nightly"; else say "  updates: manual ($SRC/install/update.sh)"; fi
 say ""
 
 # ---- install ----

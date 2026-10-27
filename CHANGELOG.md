@@ -6,6 +6,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `install/update.sh` moves an install to the newest release: it switches
+  the checkout to the newest `vX.Y.Z` tag, re-runs the platform installer
+  with the saved settings, and restores the previous release if the gateway
+  does not answer afterwards. `--check` only reports whether an update
+  exists. Checkouts with local changes or on a branch other than `main` are
+  left alone, and release candidates are skipped.
+- Opt-in automatic updates: the setup wizard asks, and a yes installs a
+  nightly job (launchd `com.docklets.updater`, or the systemd
+  `docklets-updater.timer`) that runs the update between 3 and 5 am. The
+  choice is saved in `~/.config/docklets/install.env` with the folder and
+  port, and later re-runs keep it.
+- The tunnel connector reports its docklets version to the edge as login
+  metadata, so a managed edge can say when an update is available.
+
+### Changed
+
+- New installs from the setup wizard start on the newest release tag
+  instead of `main`. Existing checkouts that follow a branch keep pulling
+  it on re-run.
+- The Linux installer restarts running services on every run, as the macOS
+  installer already did, so a re-run (or an update) applies at once.
+
 ## [0.4.0] - 2026-10-26
 
 ### Upgrading

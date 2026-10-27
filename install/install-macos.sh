@@ -77,8 +77,52 @@ for svc in $SERVICES; do
   launchctl bootstrap "gui/$(id -u)" "$AGENTS/$svc.plist"
 done
 
+# Automatic updates are opt-in: a nightly job between 3 and 5 am runs
+# install/update.sh, which moves to the newest release and rolls back if the
+# gateway does not come back. The choice is kept for later re-runs.
+CONF="$HOME/.config/docklets"
+mkdir -p "$CONF"
+AUTO_UPDATE="${DOCKLETS_AUTO_UPDATE:-$(sed -n 's/^DOCKLETS_AUTO_UPDATE=//p' "$CONF/install.env" 2>/dev/null)}"
+[ "$AUTO_UPDATE" = "1" ] || AUTO_UPDATE=0
+printf 'DOCKLETS_ROOT=%s\nDOCKLETS_PORT=%s\nDOCKLETS_AUTO_UPDATE=%s\n' "$ROOT" "$PORT" "$AUTO_UPDATE" > "$CONF/install.env"
+if [ "$AUTO_UPDATE" = "1" ]; then
+  cat > "$AGENTS/com.docklets.updater.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.docklets.updater</string>
+    <key>ProgramArguments</key><array><string>/bin/bash</string><string>$REPO/install/update.sh</string><string>--auto</string></array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>$(dirname "$NODE_BIN"):$DOCKER_DIR:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key><string>$HOME</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict><key>Hour</key><integer>$((3 + RANDOM % 2))</integer><key>Minute</key><integer>$((RANDOM % 60))</integer></dict>
+    <key>StandardOutPath</key><string>$LOGS/updater.log</string>
+    <key>StandardErrorPath</key><string>$LOGS/updater.log</string>
+</dict>
+</plist>
+EOF
+  # An update re-runs this installer from the updater job itself; reloading
+  # that job would stop the update halfway, so it keeps its loaded schedule.
+  if [ -z "${DOCKLETS_UPDATE_RUNNING:-}" ]; then
+    launchctl bootout "gui/$(id -u)/com.docklets.updater" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$AGENTS/com.docklets.updater.plist"
+  fi
+else
+  launchctl bootout "gui/$(id -u)/com.docklets.updater" 2>/dev/null || true
+  rm -f "$AGENTS/com.docklets.updater.plist"
+fi
+
 echo "docklets installed."
 echo "  root:    $ROOT"
 echo "  gateway: http://localhost:$PORT/"
 echo "  logs:    $LOGS/"
+if [ "$AUTO_UPDATE" = "1" ]; then
+  echo "  updates: automatic, nightly (log: $LOGS/updater.log)"
+else
+  echo "  updates: run $REPO/install/update.sh, or re-run setup to turn on automatic updates"
+fi
 echo "Deploy something: mkdir -p $ROOT/hello && echo '<h1>hi</h1>' > $ROOT/hello/index.html"

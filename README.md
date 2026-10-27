@@ -150,9 +150,10 @@ Deeper detail lives in [docs/architecture.md](docs/architecture.md).
 
 Requirements: Docker (or OrbStack/Colima), Node 20 or newer, macOS or Linux.
 
-The setup wizard is one command; it asks where your folder should live and
-which port, then does everything (and is safe to re-run any time). Read it
-first if you like: [install/setup.sh](install/setup.sh).
+The setup wizard is one command; it asks where your folder should live,
+which port, and whether to update automatically, then does everything (and
+is safe to re-run any time). Read it first if you like:
+[install/setup.sh](install/setup.sh).
 
 ```bash
 curl -fsSL https://docklets.dev/install | bash
@@ -381,9 +382,23 @@ docker logs docklet-<slug>
 # deployer log
 tail -f <root>/.gateway/logs/deployer.log
 
+# update to the newest release (rolls back if the gateway does not come back)
+./install/update.sh --check           # is there one?
+./install/update.sh
+
 # stop everything (asset root untouched; includes the connector service if present)
-./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer,connector}
+./install/uninstall-macos.sh          # or systemctl --user disable --now docklets-{gateway,deployer,connector} docklets-updater.timer
 ```
+
+The setup wizard also offers automatic updates: a nightly job between 3 and
+5 am runs `install/update.sh`, which switches the install to the newest
+release tag, re-runs the installer with your saved settings, and restores
+the previous release if the gateway does not answer afterwards. A checkout
+with local changes, or on a branch other than `main`, is never touched. The
+log is `<root>/.gateway/logs/updater.log` (macOS) or
+`journalctl --user -u docklets-updater` (Linux). A managed tunnel edge also
+learns which version each connector runs, so it can tell you when an update
+is available.
 
 ## Roadmap
 
