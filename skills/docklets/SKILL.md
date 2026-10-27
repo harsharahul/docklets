@@ -81,6 +81,22 @@ from that directory, add the `AGENTS.md` instructions to your standing
 instructions with `<ASSETS>` set to the asset root and `<HOST>` set to how the
 user reaches the gateway.
 
+## 4b. Private docklets
+
+A slug with an `access.json` is private: visitors need a secret link or a
+password. Create it with the access command, never by hand:
+
+```bash
+cd <asset-root>
+node <repo>/bin/access.mjs link <slug> [--label "for Acme"] [--expires 7d]
+node <repo>/bin/access.mjs password <slug> --generate
+node <repo>/bin/access.mjs list
+```
+
+Give the user the printed link or password; it is shown once and stored
+only as a hash. Make a slug public again (`public <slug>`) only when the
+user asks. Details: `docs/access.md`.
+
 ## 5. Operate
 
 ```bash

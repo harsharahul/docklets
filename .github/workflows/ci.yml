@@ -43,7 +43,7 @@ jobs:
           echo "TESTROOT=$TESTROOT" >> "$GITHUB_ENV"
           cp -R examples/guestbook examples/hello-static "$TESTROOT"/
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_PORT=8081 DOCKLETS_DETACH=1 \
-            DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw ./bin/serve.sh
+            DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_ACCESS=dk-ci-access ./bin/serve.sh
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://127.0.0.1:8081/ && break; sleep 2
           done
@@ -53,7 +53,7 @@ jobs:
             docker ps -a; docker logs dk-ci-gw 2>&1 | tail -30; exit 1
           }
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
-            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- DOCKLETS_ACCESS=dk-ci-access \
             node bin/deployer.mjs --once
       - name: Verify static asset
         run: |
@@ -117,6 +117,78 @@ jobs:
           docker inspect dk-ci-guestbook \
             --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}}' | \
             grep -q 'ALL.*map\[\]'
+          docker inspect dk-ci-access \
+            --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}} ro={{.HostConfig.ReadonlyRootfs}}' | \
+            grep -q 'ALL.*map\[\] ro=true'
+      - name: Verify private docklets
+        run: |
+          B=http://127.0.0.1:8081
+          fail() { echo "::error::$1"; docker logs dk-ci-access 2>&1 | tail -20; docker logs dk-ci-gw 2>&1 | tail -10; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' --path-as-is "$@"; }
+          export DOCKLETS_ROOT="$TESTROOT"
+          mkdir -p "$TESTROOT/secret" "$TESTROOT/echo"
+          echo 'SECRET CONTENT' > "$TESTROOT/secret/index.html"
+          printf '{ "runtime": "node", "entry": "server.js", "port": 3000 }\n' > "$TESTROOT/echo/app.json"
+          cat > "$TESTROOT/echo/server.js" <<'JS'
+          require('node:http').createServer((req, res) => {
+            res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'public, max-age=600' });
+            res.end(`echo saw authorization=${req.headers.authorization ? 'present' : 'absent'} path=${req.url}`);
+          }).listen(Number(process.env.PORT));
+          JS
+          LINK=$(node bin/access.mjs link secret | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)
+          printf 'correct horse battery\n' | node bin/access.mjs password secret
+          ELINK=$(node bin/access.mjs link echo | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)
+          [ -n "$LINK" ] && [ -n "$ELINK" ] || fail "access CLI minted no links"
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- DOCKLETS_ACCESS=dk-ci-access \
+            node bin/deployer.mjs --once
+          for i in $(seq 1 30); do [ "$(code -H "Authorization: Bearer $ELINK" "$B/echo/")" = 200 ] && break; sleep 2; done
+
+          # a browser page load goes to the login page; an API call gets 401
+          H="$(curl -s -D - -o /dev/null -H 'Accept: text/html' "$B/secret/page.html")"
+          echo "$H" | grep -q '^HTTP/1.1 303' || fail "private slug not redirected: $H"
+          echo "$H" | grep -qi '^location: /.docklets/access/login?slug=secret&return=%2Fsecret%2Fpage.html' || fail "wrong login location: $H"
+          echo "$H" | grep -qi '^cache-control: private' || fail "redirect is shared-cacheable"
+          [ "$(code -H 'Accept: application/json' "$B/secret/")" = 401 ] || fail "API request not 401"
+          [ "$(code "$B/.docklets/access/login?slug=secret&return=%2Fsecret%2F")" = 200 ] || fail "login page"
+
+          # a secret link and the password each open it; access.json is never served
+          J="$RUNNER_TEMP/jar"
+          curl -s -c "$J" -o /dev/null --data-urlencode slug=secret --data-urlencode "token=$LINK" \
+            --data-urlencode return=/secret/ "$B/.docklets/access/redeem"
+          [ "$(curl -s -b "$J" -D "$RUNNER_TEMP/h" "$B/secret/")" = "SECRET CONTENT" ] || fail "link cookie does not open the slug"
+          grep -qi '^cache-control: private' "$RUNNER_TEMP/h" || fail "private content is shared-cacheable"
+          [ "$(code -b "$J" "$B/secret/access.json")" = 404 ] || fail "access.json served to an unlocked visitor"
+          [ "$(code -H 'Accept: text/html' "$B/secret/access.json")" = 303 ] || fail "access.json not locked"
+          rm -f "$J"
+          curl -s -c "$J" -o /dev/null --data-urlencode slug=secret --data-urlencode 'password=correct horse battery' \
+            --data-urlencode return=/secret/ "$B/.docklets/access/unlock"
+          [ "$(curl -s -b "$J" "$B/secret/")" = "SECRET CONTENT" ] || fail "password cookie does not open the slug"
+
+          # no path form reaches private content without a credential
+          for p in '//secret/' '/./secret/' '/x/../secret/' '/hello-static/../secret/' '/%2e/secret/' '/%2Fsecret/' '/hello-static%2F..%2Fsecret/'; do
+            c="$(code "$B$p")"; b="$(curl -s --path-as-is "$B$p")"
+            { [ "$c" = 400 ] || [ "$c" = 303 ]; } && [ "$b" != "SECRET CONTENT" ] || fail "bypass $p answered $c"
+          done
+          for p in '/%73ecret/' '/secret' '/secret%2Findex.html'; do
+            [ "$(code -H 'Accept: text/html' "$B$p")" = 303 ] || fail "$p not locked"
+          done
+          [ "$(code -I -H 'Accept: text/html' "$B/secret/")" = 303 ] || fail "HEAD not locked"
+
+          # a private app: a dkl_ bearer opens it and never reaches the app; other bearers do not open it
+          [ "$(curl -s -H "Authorization: Bearer $ELINK" -D "$RUNNER_TEMP/h2" "$B/echo/x")" = "echo saw authorization=absent path=/x" ] \
+            || fail "bearer link did not open the app, or reached it"
+          grep -qi '^cache-control: private' "$RUNNER_TEMP/h2" || fail "app's public cache header not overridden"
+          [ "$(code -H 'Authorization: Bearer app-own-token' -H 'Accept: application/json' "$B/echo/x")" = 401 ] || fail "non-link bearer opened a private app"
+          if grep -q '"secret"' "$TESTROOT/.status.json"; then fail "status feed lists a private slug"; fi
+
+          # without the access service: public slugs still serve, private ones fail closed
+          docker stop dk-ci-access >/dev/null
+          [ "$(code "$B/hello-static/")" = 200 ] || fail "public slug down with the access service"
+          [ "$(code -b "$J" "$B/secret/")" = 502 ] || fail "private slug did not fail closed"
+          docker start dk-ci-access >/dev/null
+          rm -rf "$TESTROOT/secret" "$TESTROOT/echo" "$J"
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- DOCKLETS_ACCESS=dk-ci-access \
+            node bin/deployer.mjs --once
       - name: Verify status feed and dashboard
         run: |
           test -f "$TESTROOT/.status.json"
@@ -149,7 +221,7 @@ jobs:
             echo "::error::root still lists slugs"; exit 1
           fi
           # agent instruction files in the root are never served publicly
-          sed -e "s|<ASSETS>|$TESTROOT|g" -e "s|<HOST>|http://127.0.0.1:8081|g" AGENTS.md | grep -v '^>' > "$TESTROOT/AGENTS.md"
+          sed -e "s|<ASSETS>|$TESTROOT|g" -e "s|<HOST>|http://127.0.0.1:8081|g" -e "s|<DOCKLETS>|$PWD|g" AGENTS.md | grep -v '^>' > "$TESTROOT/AGENTS.md"
           ln -s AGENTS.md "$TESTROOT/CLAUDE.md"
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/AGENTS.md)" = "404" ] \
             || { echo "::error::AGENTS.md publicly served"; exit 1; }
@@ -159,7 +231,7 @@ jobs:
       - name: Verify admin plane security properties
         run: |
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
-            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- DOCKLETS_ACCESS=dk-ci-access \
             DOCKLETS_POLL_MS=1500 DOCKLETS_ADMIN_PORT=2020 \
             node bin/deployer.mjs > /tmp/admin-deployer.log 2>&1 &
           ADMIN_PID=$!
@@ -297,7 +369,7 @@ jobs:
         run: |
           rm "$TESTROOT/guestbook/app.json"
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_NETWORK=dk-ci \
-            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- DOCKLETS_ACCESS=dk-ci-access \
             node bin/deployer.mjs --once
           if docker ps -a --format '{{.Names}}' | grep -q '^dk-ci-guestbook$'; then
             echo "container should have been removed" && exit 1

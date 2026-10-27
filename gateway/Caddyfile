@@ -17,19 +17,52 @@ http://:8080 {
 	root * /srv
 	encode gzip
 
-	# Dynamic app routes maintained by the deployer. reverse_proxy terminates
-	# matched requests, so proxied slugs never fall through to file_server.
-	import /etc/caddy/routes/*.caddy
-
 	# The bare root redirects to the status dashboard instead of listing every
 	# slug. Individual routes still resolve; there is no public file index. The
 	# installers deploy the dashboard to /status/ so this target always exists.
 	@root path /
 	redir @root /status/ 302
 
-	# No `browse`: a directory without index.html 404s instead of listing files.
-	file_server {
-		hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json
+	# Everything order-sensitive runs inside this one route block, in written
+	# order: the path guard, the access check for private slugs, the app
+	# routes, then the file server.
+	route {
+		# Ambiguous paths (dot segments, double slashes, and their encoded
+		# forms) are refused outright. {http.request.uri.path} is decoded but
+		# not cleaned, so this sees what the cleaned matchers below never do.
+		@noncanon expression `{http.request.uri.path}.matches("//|/\\.\\.?(/|$)")`
+		respond @noncanon "Bad Request" 400
+
+		# Login page, password unlock, and secret-link redeem for private slugs.
+		handle /.docklets/access/* {
+			reverse_proxy {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100}
+		}
+
+		# A slug holding an access.json is private: the access service decides
+		# every request to it. The slug comes from the CLEANED path, the same
+		# view file_server and the app routes use, so the check and the content
+		# can never disagree about which slug a request is for. Public slugs
+		# never reach the access service; private ones fail closed without it.
+		@slugged path_regexp slug ^/([^/]+)
+		route @slugged {
+			@private file /{re.slug.1}/access.json
+			header @private >Cache-Control private
+			forward_auth @private {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100} {
+				uri /check?slug={re.slug.1}
+			}
+			# A secret-link bearer token is for the gateway, never the app.
+			@linkbearer header_regexp Authorization ^[Bb]earer\s+dkl_
+			request_header @linkbearer -Authorization
+		}
+
+		# Dynamic app routes maintained by the deployer. reverse_proxy terminates
+		# matched requests, so proxied slugs never fall through to file_server.
+		import /etc/caddy/routes/*.caddy
+
+		# No `browse`: a directory without index.html 404s instead of listing files.
+		file_server {
+			hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json access.json
+		}
 	}
 
 	header {

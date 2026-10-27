@@ -9,6 +9,8 @@
 #   DOCKLETS_PORT      published gateway port   (default: 8080)
 #   DOCKLETS_NETWORK   internal docker network  (default: docklets-net)
 #   DOCKLETS_GATEWAY   gateway container name   (default: docklets-gateway)
+#   DOCKLETS_ACCESS    access service container (default: docklets-access; the
+#                      deployer runs it, the gateway asks it about private slugs)
 #   DOCKLETS_DETACH    "1" runs the container detached and exits (for CI and
 #                      environments that reap a step's attached processes)
 set -euo pipefail
@@ -17,6 +19,7 @@ ROOT="$(cd "${DOCKLETS_ROOT:-$PWD}" && pwd)"
 PORT="${DOCKLETS_PORT:-8080}"
 NET="${DOCKLETS_NETWORK:-docklets-net}"
 NAME="${DOCKLETS_GATEWAY:-docklets-gateway}"
+ACCESS="${DOCKLETS_ACCESS:-docklets-access}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CADDYFILE="${DOCKLETS_CADDYFILE:-$HERE/../gateway/Caddyfile}"
 
@@ -34,6 +37,7 @@ GW_ARGS=(
   -v "$ROOT":/srv:ro
   -v "$CADDYFILE":/etc/caddy/Caddyfile:ro
   -v "$ROOT/.gateway/routes":/etc/caddy/routes:ro
+  -e DOCKLETS_ACCESS_UPSTREAM="$ACCESS:9100"
   --read-only
   --tmpfs /tmp
   --tmpfs /data

@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { validRelPath, walkManifest, hashFile, scryptHash, scryptVerify }
+import { validRelPath, walkManifest, hashFile, scryptHash, scryptVerify, scryptVerifyAsync }
   from '../bin/sync-common.mjs';
 
 test('validRelPath accepts normal paths and rejects escapes and reserved names', () => {
@@ -56,4 +56,15 @@ test('scryptVerify accepts the hex hash encoding used by managed control planes'
   assert.equal(scryptVerify('tok-wrong', hexStored), false);
   // b64url format still verifies (round trip through our own mint)
   assert.ok(scryptVerify('tok-b64', scryptHash('tok-b64')));
+});
+
+test('scryptVerifyAsync agrees with scryptVerify on both encodings and on garbage', async () => {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync('tok-hex', salt, 32, { N: 16384, r: 8, p: 1 });
+  const hexStored = `scrypt$16384$${salt.toString('hex')}$${key.toString('hex')}`;
+  assert.equal(await scryptVerifyAsync('tok-hex', hexStored), true);
+  assert.equal(await scryptVerifyAsync('tok-wrong', hexStored), false);
+  assert.equal(await scryptVerifyAsync('pw-b64', scryptHash('pw-b64')), true);
+  assert.equal(await scryptVerifyAsync('pw-b64', 'garbage'), false);
+  assert.equal(await scryptVerifyAsync('pw-b64', 'scrypt$99999999999$x$y'), false);
 });

@@ -1,7 +1,8 @@
 # Architecture
 
-Three components cooperate around one directory (the asset root). Nothing else
-exists: no database, no message bus, no deploy service.
+Three components cooperate around one directory (the asset root), with a
+small access service for private slugs. Nothing else exists: no database, no
+message bus, no deploy service.
 
 ## The asset root
 
@@ -10,10 +11,12 @@ exists: no database, no message bus, no deploy service.
 ├── <slug>/                  one directory per asset
 │   ├── index.html           static content, served as files
 │   ├── app.json             optional manifest: makes the slug a docklet
+│   ├── access.json          optional policy: makes the slug private
 │   └── server.js            docklet code (entry named by the manifest)
 ├── .data/<slug>/            per-app persistent state (host disk)
 └── .gateway/
     ├── routes/*.caddy       generated route fragments, one per docklet
+    ├── access-key           cookie signing key for private slugs (0600)
     └── logs/                service logs when installed via the installers
 ```
 
@@ -61,6 +64,17 @@ seconds, or exactly once with `--once`):
 Manifests are validated before anything runs (slug pattern, entry path
 confinement, port range, env key pattern); symlinked manifests are ignored.
 
+## The access service (`bin/access.mjs`)
+
+A slug holding an `access.json` is private. The gateway checks every request
+to it with the access service (Caddy `forward_auth`) and routes
+`/.docklets/access/*` (login page, password unlock, secret-link redeem) to
+it. The decision logic is `bin/access-core.mjs`, pure functions over
+WebCrypto. The deployer runs the service as the hardened, read-only
+`docklets-access` container; in the container image it runs beside the
+receiver on `127.0.0.1:9100`. Public slugs never reach it. Details:
+[access.md](access.md).
+
 ## App containers
 
 One per docklet, named `<prefix><slug>` (default `docklet-<slug>`):
@@ -84,6 +98,10 @@ exec the entry with `PORT` set from the manifest.
 
 ```
 client → gateway :8080
+           ├── ambiguous path (dot segments, //)  → 400
+           ├── /<private-slug>/...  → forward_auth → access service
+           │                           ├── signed in → continue below
+           │                           └── otherwise → 303 login page / 401
            ├── /<static-slug>/...  → file_server from /srv (read-only)
            └── /<docklet-slug>/... → strip prefix → reverse_proxy →
                                      docklet container :PORT (internal network)

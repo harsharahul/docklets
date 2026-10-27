@@ -7,7 +7,9 @@
  * into a hidden staging area, then finish moves files into place, deletes
  * what the manifest no longer contains, and clears the staging area. The
  * live tree never holds a half-applied sync: converge honors .sync-lock
- * during the brief finish step.
+ * during the brief finish step. One exception to the mirror keeps private
+ * docklets private: a slug's access.json that the manifest omits is kept
+ * while the slug has other files, unless start names the slug in `public`.
  *
  * Auth: every request (except /healthz) carries a plaintext token as a
  * bearer header, verified against scrypt hashes on disk. The plaintext is
@@ -139,6 +141,21 @@ function readBody(req, cap) {
   });
 }
 
+/**
+ * Omission never makes a docklet public: a slug's access.json that a session
+ * leaves out survives while the slug keeps other files, unless the session
+ * names the slug in `public`. Removing the whole slug removes it too.
+ */
+function keptLocks(gone, manifest, pub) {
+  const kept = new Set();
+  for (const p of gone) {
+    const m = /^([^/]+)\/access\.json$/.exec(p);
+    if (!m || pub.has(m[1])) continue;
+    for (const q of manifest.keys()) if (q.startsWith(`${m[1]}/`)) { kept.add(p); break; }
+  }
+  return kept;
+}
+
 async function handleStart(body) {
   const files = body?.files;
   if (!Array.isArray(files) || files.length > MAX_FILES) return { code: 400, body: { error: 'bad manifest' } };
@@ -154,6 +171,10 @@ async function handleStart(body) {
     total += f.size;
   }
   if (total > MAX_BYTES) return { code: 413, body: { error: 'over quota', maxBytes: MAX_BYTES } };
+  const pub = body.public ?? [];
+  if (!Array.isArray(pub) || !pub.every((s) => validRelPath(s) && !s.includes('/'))) {
+    return { code: 400, body: { error: 'public must be a list of slugs' } };
+  }
   if (freshSession()) return { code: 409, body: { error: 'sync already in progress' } };
 
   // Reserve the slot before the first await: hashing the files already on
@@ -177,12 +198,14 @@ async function handleStart(body) {
       } catch {}
       if (!same) need.push(p);
     }
-    const extraneous = liveFiles().map((e) => e.path).filter((p) => !manifest.has(p)).sort();
-    session = { id, files: manifest, need: new Set(need), received: new Set(), existed,
+    const gone = liveFiles().map((e) => e.path).filter((p) => !manifest.has(p));
+    const kept = keptLocks(gone, manifest, new Set(pub));
+    const extraneous = gone.filter((p) => !kept.has(p)).sort();
+    session = { id, files: manifest, need: new Set(need), received: new Set(), existed, kept,
       staging: path.join(ROOT, `.staging-${id}`), createdAt: Date.now(), bytes: 0 };
     fs.mkdirSync(session.staging, { recursive: true });
-    log(`sync start: ${files.length} files, ${need.length} to upload, ${extraneous.length} extraneous`);
-    return { code: 200, body: { session: id, need: need.sort(), extraneous } };
+    log(`sync start: ${files.length} files, ${need.length} to upload, ${extraneous.length} extraneous, ${kept.size} kept private`);
+    return { code: 200, body: { session: id, need: need.sort(), extraneous, kept: [...kept].sort() } };
   } catch (e) {
     if (session && session.id === id) session = null;
     throw e;
@@ -271,7 +294,7 @@ function handleFinish(body) {
     }
     let deleted = 0;
     for (const e of liveFiles()) {
-      if (!s.files.has(e.path)) { fs.rmSync(path.join(ROOT, e.path), { force: true }); deleted++; }
+      if (!s.files.has(e.path) && !s.kept.has(e.path)) { fs.rmSync(path.join(ROOT, e.path), { force: true }); deleted++; }
     }
     pruneEmptyDirs(ROOT);
     const added = [...s.received].filter((p) => !s.existed.has(p)).length;
@@ -316,7 +339,7 @@ seedDashboard();
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host || 'receiver'}`);
-    if (req.method === 'GET' && u.pathname === '/healthz') return sendJson(res, 200, { ok: true });
+    if (req.method === 'GET' && u.pathname === '/healthz') return sendJson(res, 200, { ok: true, features: ['access'] });
     const a = auth(req);
     if (a === 'unavailable') return sendJson(res, 503, { error: 'token hash unreadable, failing closed' });
     if (a !== 'ok') return sendJson(res, 401, { error: 'unauthorized' });

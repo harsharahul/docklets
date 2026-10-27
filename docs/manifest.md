@@ -17,6 +17,10 @@ converge pass.
 Unknown fields are ignored. An invalid manifest is skipped with a logged
 reason, and the slug keeps serving whatever it served before.
 
+`access.json` beside `app.json` is also reserved: it makes the slug private
+(see [access.md](access.md)). Neither file is ever served, and changing
+`access.json` never restarts the app.
+
 ## Examples
 
 Minimal node app:

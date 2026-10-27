@@ -145,6 +145,45 @@ dot-entries and the reserved folders are never readable through them.
 The receiver binds 127.0.0.1 by default. Bind it wider only behind a
 private network boundary or an authenticating proxy.
 
+## Private docklets
+
+A slug holding an `access.json` is private; the gateway asks the access
+service (`bin/access.mjs`) about every request to it. Design points, in the
+order a request meets them (details in [docs/access.md](docs/access.md)):
+
+- **Path ambiguity is refused before any decision.** Dot segments, double
+  slashes, and their encoded forms answer `400`. The slug is taken from the
+  cleaned path, the same view the file server and app routes use, so the
+  check and the served content can never disagree about which slug a request
+  is for. CI runs a bypass matrix (`//slug/`, `/./slug/`, `/x/../slug/`,
+  `/%2e/slug/`, `/%2Fslug/`, encoded separators) against the real gateway.
+- **Fail closed.** An unreadable, unparseable, unknown-version, or symlinked
+  `access.json` keeps the slug closed (`503`); a missing access service
+  answers `502` for private slugs. Public slugs never touch the service.
+- **Secrets are stored hashed and shown once.** Passwords are scrypt hashes;
+  link tokens are 256-bit random values stored as sha256 digests. Link tokens
+  travel in the URL fragment, which browsers never send, so they stay out of
+  access logs and `Referer` headers. A `dkl_` bearer token is stripped by the
+  gateway before a request reaches an app.
+- **Cookies carry no session state.** Each cookie is an HMAC over the slug,
+  the issuing credential, the expiry, and that credential's stored hash, keyed
+  by a 32-byte key in `<root>/.gateway/access-key` (0600, never served or
+  synced). Revoking a link or changing the password invalidates exactly the
+  cookies it issued.
+- **Guessing is throttled.** Failed attempts are limited per visitor, and
+  concurrent scrypt checks are capped so login attempts cannot exhaust a
+  memory-capped host. Redirect targets after unlocking are confined to the
+  slug.
+- **Nothing private is advertised or cached.** Private slugs are left out of
+  the public status feed. Their responses carry `Cache-Control: private`
+  (overriding app values), and access responses are `no-store`.
+- **The access container is read-only.** It runs with a read-only root
+  filesystem, the asset root and key mounted read-only, all capabilities
+  dropped, and no published ports.
+- **A sync never makes a docklet public by omission.** The receiver keeps a
+  slug's `access.json` that a session leaves out, unless the session names
+  the slug as public or removes the whole slug.
+
 ## Known limitations
 
 1. **Apps have outbound internet.** Needed for `npm install` and for apps that
@@ -162,8 +201,11 @@ private network boundary or an authenticating proxy.
    between apps rests on the container boundary and per-app mounts, not on
    distinct users. A container-escape-class kernel/runtime vulnerability
    remains the escalation path out of the sandbox.
-4. **No auth on the gateway.** Everything served is public to whoever can
-   reach the port. Gate it at your reverse proxy, or keep it LAN/tailnet-only.
+4. **Private docklets keep outsiders out, not slugs from each other.** A slug
+   with an `access.json` is private (see "Private docklets" above), but every
+   slug on a gateway shares one origin, so script in another slug on the same
+   host can make requests to a private slug with a signed-in visitor's cookie.
+   Everything without an `access.json` is public to whoever can reach the port.
 5. **The deployer trusts its own code.** It runs `docker` on the host. Protect
    the repo checkout like you would protect any host software; never place it
    inside the agent-writable asset root.

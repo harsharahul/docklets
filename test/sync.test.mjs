@@ -70,6 +70,40 @@ test('dry run reports the plan and changes nothing', () => {
   assert.ok(fs.existsSync(path.join(serverRoot, 'index.html')));
 });
 
+test('a lock kept on the server is reported, and --public lifts it', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-local4-'));
+  fs.mkdirSync(path.join(local, 'draft'));
+  fs.writeFileSync(path.join(local, 'draft', 'index.html'), 'd');
+  fs.writeFileSync(path.join(local, 'draft', 'access.json'), '{"v":1}');
+  assert.equal(runSync(local).status, 0);
+  fs.rmSync(path.join(local, 'draft', 'access.json'));
+
+  let r = runSync(local, ['--dry-run']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /would keep 1 docklet private: draft/);
+  r = runSync(local);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /kept draft private/);
+  assert.match(r.stdout, /--public draft/);
+  assert.ok(fs.existsSync(path.join(serverRoot, 'draft', 'access.json')));
+
+  r = runSync(local, ['--public', 'draft']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /kept/);
+  assert.ok(!fs.existsSync(path.join(serverRoot, 'draft', 'access.json')));
+  assert.ok(fs.existsSync(path.join(serverRoot, 'draft', 'index.html')));
+});
+
+test('--public needs a slug', () => {
+  const local = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-local5-'));
+  fs.writeFileSync(path.join(local, 'x.txt'), 'x');
+  const r = spawnSync(process.execPath, [SYNC, local, '--public'], {
+    encoding: 'utf8', env: { ...process.env, DOCKLETS_SYNC_URL: base, DOCKLETS_SYNC_TOKEN: TOKEN },
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--public needs a slug/);
+});
+
 test('an empty folder is refused without --yes', () => {
   const local = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-empty-'));
   const r = runSync(local);
