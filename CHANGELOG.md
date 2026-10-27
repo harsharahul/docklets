@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
+### Upgrading
+
+- Self-hosted and tunneled: re-run the setup wizard once
+  (`curl -fsSL https://docklets.dev/install | bash`, or `install/setup.sh`
+  from your checkout). It pulls this release, saves your folder and port to
+  `~/.config/docklets/install.env`, and asks about nightly updates. After
+  that, `install/update.sh` (or the nightly job) moves you from release to
+  release.
+
 ### Added
 
 - `install/update.sh` moves an install to the newest release: it switches
