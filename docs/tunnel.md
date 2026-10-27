@@ -91,6 +91,11 @@ route, never anyone else's, and the edge can revoke it without touching
 other tenants. Without `TUNNEL_USER` the connector uses classic edge-wide
 token auth, which fits a private frp server you run yourself.
 
+The connector also sends its docklets version as login metadata
+(`docklets_version`), so a managed edge can show when an update is
+available. It carries no credential, and edges that ignore it are
+unaffected.
+
 ## Running as a service
 
 The connector runs in the foreground so any service manager can own it. macOS

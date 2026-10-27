@@ -7,6 +7,7 @@ import path from 'node:path';
 
 const CONNECTOR = new URL('../bin/connector.sh', import.meta.url).pathname;
 const FRP_VERSION = fs.readFileSync(CONNECTOR, 'utf8').match(/^FRP_VERSION="([^"]+)"/m)[1];
+const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
 // A connector home with the tunnel client already "fetched": a stand-in
 // binary that prints the generated config instead of dialing anything.
@@ -35,4 +36,17 @@ test('the generated client config keeps the application heartbeat on', () => {
   assert.match(r.stdout, /^transport\.heartbeatInterval = 30$/m);
   assert.match(r.stdout, /^transport\.heartbeatTimeout = 90$/m);
   assert.match(r.stdout, /^subdomain = "alice-den"$/m);
+});
+
+test('the client tells the edge which docklets version it runs', () => {
+  // A managed edge records this at sign-in so it can say when an update is
+  // available. It rides in the login metadata, beside the tenant token.
+  for (const lines of [
+    ['TUNNEL_SERVER=edge.example.com', 'TUNNEL_TOKEN=t0k', 'TUNNEL_NAME=alice-den', 'TUNNEL_USER=alice-den'],
+    ['TUNNEL_SERVER=edge.example.com', 'TUNNEL_TOKEN=t0k', 'TUNNEL_NAME=alice-den'],
+  ]) {
+    const r = run(makeHome(lines));
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`metadatas.docklets_version = "${VERSION}"`), r.stdout);
+  }
 });
