@@ -158,7 +158,7 @@ jobs:
           [ "$(curl -s -b "$J" -D "$RUNNER_TEMP/h" "$B/secret/")" = "SECRET CONTENT" ] || fail "link cookie does not open the slug"
           grep -qi '^cache-control: private' "$RUNNER_TEMP/h" || fail "private content is shared-cacheable"
           [ "$(code -b "$J" "$B/secret/access.json")" = 404 ] || fail "access.json served to an unlocked visitor"
-          [ "$(code -H 'Accept: text/html' "$B/secret/access.json")" = 303 ] || fail "access.json not locked"
+          [ "$(code -H 'Accept: text/html' "$B/secret/access.json")" = 404 ] || fail "access.json not refused"
           rm -f "$J"
           curl -s -c "$J" -o /dev/null --data-urlencode slug=secret --data-urlencode 'password=correct horse battery' \
             --data-urlencode return=/secret/ "$B/.docklets/access/unlock"
@@ -178,6 +178,7 @@ jobs:
           [ "$(curl -s -H "Authorization: Bearer $ELINK" -D "$RUNNER_TEMP/h2" "$B/echo/x")" = "echo saw authorization=absent path=/x" ] \
             || fail "bearer link did not open the app, or reached it"
           grep -qi '^cache-control: private' "$RUNNER_TEMP/h2" || fail "app's public cache header not overridden"
+          [ "$(code -H "Authorization: Bearer $ELINK" "$B/echo/access.json")" = 404 ] || fail "an app could serve its access.json"
           [ "$(code -H 'Authorization: Bearer app-own-token' -H 'Accept: application/json' "$B/echo/x")" = 401 ] || fail "non-link bearer opened a private app"
           [ "$(curl -s -H "Authorization: BEARER $ELINK" "$B/echo/y")" = "echo saw authorization=absent path=/y" ] || fail "upper-case BEARER token reached the app"
           if grep -q '"secret"' "$TESTROOT/.status.json"; then fail "status feed lists a private slug"; fi

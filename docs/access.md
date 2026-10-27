@@ -70,7 +70,9 @@ APIs from a public slug.
 - `password` and `links` are both optional. A file with neither keeps the
   slug private with no way in.
 - Passwords are scrypt hashes; link tokens are stored as sha256 digests.
-- The file is never served, even to a visitor who is signed in.
+- The file is never served, even to a visitor who is signed in: the gateway
+  answers `404` for `/<slug>/access.json` before the file server or an app
+  that serves its own folder could.
 - A file the parser does not fully understand (a wrong version, a plaintext
   password, a malformed link) keeps the slug closed and logs the reason. So
   does a symlinked `access.json`.

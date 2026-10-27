@@ -39,6 +39,11 @@ http://:8080 {
 		@badtop not path_regexp ^/[a-z0-9._-]*(/|$)
 		error @badtop 404
 
+		# A slug's access policy is never served, by the file server or by an
+		# app that serves its own folder.
+		@policy path_regexp ^/[^/]+/(access\.json|\.access\.json\..*)$
+		error @policy 404
+
 		# Login page, password unlock, and secret-link redeem for private slugs.
 		handle /.docklets/access/* {
 			reverse_proxy {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100}

@@ -169,7 +169,9 @@ them (details in [docs/access.md](docs/access.md)):
   link tokens are 256-bit random values stored as sha256 digests. Link tokens
   travel in the URL fragment, which browsers never send, so they stay out of
   access logs and `Referer` headers. A `dkl_` bearer token is stripped by the
-  gateway before a request reaches an app.
+  gateway before a request reaches an app, and the gateway itself refuses
+  `/<slug>/access.json`, so no app serving its own folder can hand out the
+  hashes.
 - **Cookies carry no session state.** Each cookie is an HMAC over the slug,
   the issuing credential, the expiry, and that credential's stored hash, keyed
   by a 32-byte key in `<root>/.gateway/access-key` (0600, never served or
