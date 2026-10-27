@@ -73,10 +73,32 @@ before(async () => {
 });
 after(() => child.kill());
 
-test('a public slug passes the check', async () => {
+test('a public slug passes the check and is not marked private', async () => {
   slug('pub');
   const r = await check('pub');
   assert.equal(r.status, 200);
+  assert.equal(r.headers.get('x-docklets-access'), null);
+});
+
+test('root files and missing folders pass the check', async () => {
+  fs.writeFileSync(path.join(root, '404.html'), 'nf');
+  assert.equal((await check('404.html')).status, 200);
+  assert.equal((await check('.status.json')).status, 200);
+  assert.equal((await check('no-such-folder')).status, 200);
+});
+
+test('a policy the service cannot read keeps the slug closed', async () => {
+  slug('unreadable', { v: 1 });
+  fs.chmodSync(path.join(root, 'unreadable', 'access.json'), 0o000);
+  try {
+    if (process.getuid() !== 0) assert.equal((await check('unreadable')).status, 503);
+  } finally { fs.chmodSync(path.join(root, 'unreadable', 'access.json'), 0o600); }
+});
+
+test('a policy in a folder that is not a slug keeps it closed', async () => {
+  fs.mkdirSync(path.join(root, 'not.a.slug'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'not.a.slug', 'access.json'), '{"v":1}');
+  assert.equal((await check('not.a.slug')).status, 503);
 });
 
 test('a page load of a private slug goes to the login page, uncached', async () => {
@@ -105,9 +127,8 @@ test('an access.json the parser rejects fails closed', async () => {
   assert.equal((await check('linked')).status, 503, 'symlinked policy');
 });
 
-test('a slug outside the slug pattern is refused', async () => {
-  assert.equal((await check('BAD')).status, 403);
-  assert.equal((await check('..')).status, 403);
+test('a segment that is not a single path name is refused', async () => {
+  for (const s of ['..', '.', 'a%2Fb', '']) assert.equal((await check(s)).status, 403, s);
 });
 
 test('the right password sets a slug-scoped cookie the check accepts', async () => {
@@ -117,7 +138,9 @@ test('the right password sets a slug-scoped cookie the check accepts', async () 
   assert.equal(r.headers.get('location'), '/pw/deep/page.html');
   const sc = r.headers.get('set-cookie');
   assert.match(sc, /^dk_access_pw=v1\.pw\.\d+\.[A-Za-z0-9_-]+; Path=\/pw; Max-Age=604800; HttpOnly; SameSite=Lax$/);
-  assert.equal((await check('pw', { cookie: cookieOf(r) })).status, 200);
+  const ok = await check('pw', { cookie: cookieOf(r) });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get('x-docklets-access'), 'private', 'the gateway marks the response private from this');
   assert.equal((await check('draft1', { cookie: cookieOf(r).replace('dk_access_pw', 'dk_access_draft1') })).status, 303, 'not valid for another slug');
 });
 
@@ -152,6 +175,35 @@ test('a dkl_ bearer token passes the check without a cookie', async () => {
   const { token, hash } = await newLinkToken();
   slug('api', { v: 1, links: [{ id: 'api001', hash }] });
   assert.equal((await check('api', { method: 'POST', accept: '*/*', authorization: `Bearer ${token}` })).status, 200);
+});
+
+test('failed link redeems never lock anyone out', async () => {
+  const { token, hash } = await newLinkToken();
+  slug('nolock', { v: 1, links: [{ id: 'nol001', hash }] });
+  const who = client();
+  for (let i = 0; i < 5; i++) await post('/.docklets/access/redeem', { slug: 'nolock', token: 'dkl_' + 'x'.repeat(43), return: '/nolock/' }, { who });
+  const r = await post('/.docklets/access/redeem', { slug: 'nolock', token, return: '/nolock/' }, { who });
+  assert.equal(r.headers.get('location'), '/nolock/');
+});
+
+test('the login page ignores unknown error codes, including inherited names', async () => {
+  slug('lpe', { v: 1, password: scryptHash('right') });
+  const html = await (await fetch(`${base}/.docklets/access/login?slug=lpe&return=%2Flpe%2F&e=constructor`)).text();
+  assert.doesNotMatch(html, /role="alert"/);
+});
+
+test('a policy replaced within the same second is reread', async () => {
+  slug('fresh', { v: 1, password: scryptHash('first-pass') });
+  const p = path.join(root, 'fresh', 'access.json');
+  const t0 = new Date(Math.floor(Date.now() / 1000) * 1000);
+  fs.utimesSync(p, t0, t0);
+  await check('fresh');
+  fs.writeFileSync(p + '.tmp', JSON.stringify({ v: 1, password: scryptHash('other-pass') }));
+  fs.utimesSync(p + '.tmp', t0, t0);
+  assert.equal(fs.statSync(p + '.tmp').size, fs.statSync(p).size, 'same size, same mtime: only the inode differs');
+  fs.renameSync(p + '.tmp', p);
+  const r = await post('/.docklets/access/unlock', { slug: 'fresh', password: 'first-pass', return: '/fresh/' });
+  assert.equal(r.headers.get('location'), '/.docklets/access/login?slug=fresh&return=%2Ffresh%2F&e=password');
 });
 
 test('repeated failures from one client are limited, even before a correct guess', async () => {

@@ -2,12 +2,13 @@
 /**
  * docklets access service: makes a slug private when it holds an access.json.
  *
- * The gateway asks this service about every request to a private slug
- * (Caddy forward_auth: GET /check?slug=<slug>, original method and URI in
+ * The gateway asks this service about every request under a top-level name
+ * (Caddy forward_auth: GET /check?slug=<name>, original method and URI in
  * X-Forwarded-Method / X-Forwarded-Uri) and routes /.docklets/access/* here:
- * the login page, password unlock, and secret-link redeem. Public slugs never
- * reach it, so they keep serving if it is down; private slugs fail closed.
- * The decision itself lives in access-core.mjs.
+ * the login page, password unlock, and secret-link redeem. This service reads
+ * each policy itself, so file modes or what the gateway can see never change
+ * an answer; without it, the gateway fails closed. The decision itself lives
+ * in access-core.mjs.
  *
  * Configuration (env):
  *   DOCKLETS_ROOT                  asset root                      (default: $PWD)
@@ -60,21 +61,28 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 
 const policyCache = new Map();
 
-/** { public: true } | { policy } | { error }. A file that is not a plain regular file is an error. */
-function loadPolicy(slug) {
-  const p = path.join(ROOT, slug, ACCESS_FILE);
+/**
+ * { public: true } | { policy } | { error }, for the top-level name `seg`
+ * (a slug folder, or a root file whose path has no access.json under it).
+ * A file that is not a plain regular file, or that cannot be read, is an error.
+ */
+function loadPolicy(seg) {
+  const p = path.join(ROOT, seg, ACCESS_FILE);
   let st;
-  try { st = fs.lstatSync(p); } catch (e) { return e.code === 'ENOENT' ? { public: true } : { error: 'unreadable' }; }
+  try { st = fs.lstatSync(p); } catch (e) {
+    return e.code === 'ENOENT' || e.code === 'ENOTDIR' ? { public: true } : { error: 'unreadable' };
+  }
   if (!st.isFile()) return { error: 'not a regular file' };
-  const hit = policyCache.get(slug);
-  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
+  const stamp = `${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}`;
+  const hit = policyCache.get(seg);
+  if (hit && hit.stamp === stamp) return hit.result;
   let result;
   try {
     const r = parsePolicy(fs.readFileSync(p, 'utf8'));
     result = r.ok ? { policy: r.policy } : { error: r.error };
   } catch { result = { error: 'unreadable' }; }
-  if (result.error) log(`${slug}/${ACCESS_FILE} is invalid (${result.error}); the slug stays closed`);
-  policyCache.set(slug, { mtimeMs: st.mtimeMs, size: st.size, result });
+  if (result.error) log(`${seg}/${ACCESS_FILE} is invalid (${result.error}); it stays closed`);
+  policyCache.set(seg, { stamp, result });
   return result;
 }
 
@@ -164,12 +172,14 @@ async function setCookieFor(req, slug, cred, policy) {
   return `${cookieName(slug)}=${value}; Path=/${slug}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure ? '; Secure' : ''}`;
 }
 
+// The gateway asks about every request under a top-level name, so the
+// decision never depends on what the gateway itself can see or read.
 async function check(req, res, u) {
   const slug = u.searchParams.get('slug') || '';
-  if (!SLUG_RE.test(slug)) return send(res, 403, 'forbidden');
+  if (!slug || slug.includes('/') || slug === '.' || slug === '..') return send(res, 403, 'forbidden');
   const st = loadPolicy(slug);
   if (st.public) return send(res, 200);
-  if (st.error) return sendPage(res, 503, invalidPage());
+  if (st.error || !SLUG_RE.test(slug)) return sendPage(res, 503, invalidPage());
   let key;
   try { key = await accessKey(); } catch (e) {
     log(`access key unavailable (${e.message}); private slugs stay closed`);
@@ -178,7 +188,9 @@ async function check(req, res, u) {
   const d = await decide({ policy: st.policy, slug, key, now: nowSec(),
     method: req.headers['x-forwarded-method'] || 'GET', accept: req.headers.accept,
     cookieHeader: req.headers.cookie, authorization: req.headers.authorization });
-  if (d.action === 'allow') return send(res, 200);
+  // The gateway copies X-Docklets-Access onto the request and marks the
+  // response Cache-Control: private when it says so.
+  if (d.action === 'allow') return send(res, 200, '', { 'X-Docklets-Access': 'private' });
   if (d.action === 'login') return redirect(res, loginLocation(slug, req.headers['x-forwarded-uri']));
   return send(res, 401, 'this docklet is private\n', { 'WWW-Authenticate': 'Bearer realm="docklets"' });
 }
@@ -192,8 +204,11 @@ async function unlockOrRedeem(req, res, kind) {
   const st = loadPolicy(slug);
   if (st.public) return redirect(res, ret);
   if (st.error) return sendPage(res, 503, invalidPage());
+  // Only password guesses count toward the failure limit. A link token has
+  // 256 bits; counting failed redeems would only let anyone sharing a
+  // visitor's address lock them out.
   const who = clientOf(req);
-  if (limited(who)) return redirect(res, loginWith(slug, ret, 'limit'));
+  if (kind === 'unlock' && limited(who)) return redirect(res, loginWith(slug, ret, 'limit'));
 
   let cred = null;
   if (kind === 'unlock') {
@@ -212,7 +227,7 @@ async function unlockOrRedeem(req, res, kind) {
     }
   }
   if (!cred) {
-    recordFailure(who);
+    if (kind === 'unlock') recordFailure(who);
     return redirect(res, loginWith(slug, ret, kind === 'unlock' ? 'password' : 'link'));
   }
   const cookie = await setCookieFor(req, slug, cred, st.policy);
@@ -261,7 +276,7 @@ ${inner}
 }
 
 function loginPage(slug, ret, policy, e) {
-  const msg = MESSAGES[e] ? `<p role="alert" style="margin:.8rem 0 0;line-height:1.5;font-weight:600">${esc(MESSAGES[e])}</p>` : '';
+  const msg = Object.hasOwn(MESSAGES, e ?? '') ? `<p role="alert" style="margin:.8rem 0 0;line-height:1.5;font-weight:600">${esc(MESSAGES[e])}</p>` : '';
   const hidden = `<input type="hidden" name="slug" value="${esc(slug)}"><input type="hidden" name="return" value="${esc(ret)}">`;
   const form = policy.password
     ? `<form method="post" action="/.docklets/access/unlock" style="margin:1.2rem 0 0;display:grid;gap:.6rem">${hidden}

@@ -201,7 +201,7 @@ async function handleStart(body) {
     const gone = liveFiles().map((e) => e.path).filter((p) => !manifest.has(p));
     const kept = keptLocks(gone, manifest, new Set(pub));
     const extraneous = gone.filter((p) => !kept.has(p)).sort();
-    session = { id, files: manifest, need: new Set(need), received: new Set(), existed, kept,
+    session = { id, files: manifest, need: new Set(need), received: new Set(), existed, pub: new Set(pub),
       staging: path.join(ROOT, `.staging-${id}`), createdAt: Date.now(), bytes: 0 };
     fs.mkdirSync(session.staging, { recursive: true });
     log(`sync start: ${files.length} files, ${need.length} to upload, ${extraneous.length} extraneous, ${kept.size} kept private`);
@@ -286,15 +286,20 @@ function handleFinish(body) {
 
   fs.writeFileSync(LOCK, s.id);
   try {
+    // rename replaces a file atomically, so there is never a moment without
+    // it (a slug's access.json included).
     for (const p of s.received) {
       const dest = path.join(ROOT, p);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
-      try { fs.rmSync(dest, { force: true }); } catch {}
       fs.renameSync(path.join(s.staging, p), dest);
     }
+    // Kept locks are decided again against the tree as it is now: an
+    // access.json written on this side after start must survive too.
+    const gone = liveFiles().map((e) => e.path).filter((p) => !s.files.has(p));
+    const kept = keptLocks(gone, s.files, s.pub);
     let deleted = 0;
-    for (const e of liveFiles()) {
-      if (!s.files.has(e.path) && !s.kept.has(e.path)) { fs.rmSync(path.join(ROOT, e.path), { force: true }); deleted++; }
+    for (const p of gone) {
+      if (!kept.has(p)) { fs.rmSync(path.join(ROOT, p), { force: true }); deleted++; }
     }
     pruneEmptyDirs(ROOT);
     const added = [...s.received].filter((p) => !s.existed.has(p)).length;

@@ -147,19 +147,24 @@ private network boundary or an authenticating proxy.
 
 ## Private docklets
 
-A slug holding an `access.json` is private; the gateway asks the access
-service (`bin/access.mjs`) about every request to it. Design points, in the
-order a request meets them (details in [docs/access.md](docs/access.md)):
+A slug holding an `access.json` is private. The gateway asks the access
+service (`bin/access.mjs`) about every request under a top-level name, and
+the service reads the policy itself, so the decision never depends on what
+the gateway can see or read. Design points, in the order a request meets
+them (details in [docs/access.md](docs/access.md)):
 
 - **Path ambiguity is refused before any decision.** Dot segments, double
-  slashes, and their encoded forms answer `400`. The slug is taken from the
-  cleaned path, the same view the file server and app routes use, so the
-  check and the served content can never disagree about which slug a request
-  is for. CI runs a bypass matrix (`//slug/`, `/./slug/`, `/x/../slug/`,
-  `/%2e/slug/`, `/%2Fslug/`, encoded separators) against the real gateway.
+  slashes, and their encoded forms answer `400`; a top-level name that is
+  not lowercase ASCII answers `404`, because the app routes match paths
+  case-insensitively. The name is taken from the cleaned path, the same
+  view the file server and app routes use, so the check and the served
+  content can never disagree about which slug a request is for. CI runs a
+  bypass matrix (`//slug/`, `/./slug/`, `/x/../slug/`, `/%2e/slug/`,
+  `/%2Fslug/`, encoded separators, case and Unicode case variants) against
+  the real gateway.
 - **Fail closed.** An unreadable, unparseable, unknown-version, or symlinked
-  `access.json` keeps the slug closed (`503`); a missing access service
-  answers `502` for private slugs. Public slugs never touch the service.
+  `access.json` keeps the slug closed (`503`). Without the access service
+  the gateway answers `502` for every request, public slugs included.
 - **Secrets are stored hashed and shown once.** Passwords are scrypt hashes;
   link tokens are 256-bit random values stored as sha256 digests. Link tokens
   travel in the URL fragment, which browsers never send, so they stay out of
@@ -170,16 +175,19 @@ order a request meets them (details in [docs/access.md](docs/access.md)):
   by a 32-byte key in `<root>/.gateway/access-key` (0600, never served or
   synced). Revoking a link or changing the password invalidates exactly the
   cookies it issued.
-- **Guessing is throttled.** Failed attempts are limited per visitor, and
+- **Guessing is throttled.** Failed passwords are limited per visitor, and
   concurrent scrypt checks are capped so login attempts cannot exhaust a
-  memory-capped host. Redirect targets after unlocking are confined to the
-  slug.
+  memory-capped host. Link tokens (256 bits) are not limited, so nobody can
+  lock visitors out by failing redeems. Redirect targets after unlocking are
+  confined to the slug.
 - **Nothing private is advertised or cached.** Private slugs are left out of
   the public status feed. Their responses carry `Cache-Control: private`
   (overriding app values), and access responses are `no-store`.
-- **The access container is read-only.** It runs with a read-only root
-  filesystem, the asset root and key mounted read-only, all capabilities
-  dropped, and no published ports.
+- **The access container is read-only and out of the apps' reach.** It runs
+  as your user with a read-only root filesystem, the asset root and key
+  mounted read-only, all capabilities dropped, and no published ports, on an
+  internal network only the gateway joins, so an app container cannot call
+  it to guess passwords.
 - **A sync never makes a docklet public by omission.** The receiver keeps a
   slug's `access.json` that a session leaves out, unless the session names
   the slug as public or removes the whole slug.

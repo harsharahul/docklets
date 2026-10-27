@@ -185,16 +185,18 @@ export const loginLocation = (slug, returnTo) =>
 /**
  * Whether the access cookie gets the Secure flag. "1"/"0" force it; "auto"
  * sets it for https and for public hostnames, and leaves it off for loopback,
- * IP literals, and single-label or .local LAN names (served over plain http,
- * where browsers drop Secure cookies).
+ * IP literals, single-label names, and the usual private LAN suffixes (served
+ * over plain http, where browsers drop Secure cookies).
  */
+const LAN_SUFFIXES = ['.local', '.localhost', '.lan', '.home', '.home.arpa', '.internal', '.localdomain'];
+
 export function secureFor(mode, host, proto) {
   if (mode === '1') return true;
   if (mode === '0') return false;
   if (String(proto || '').toLowerCase() === 'https') return true;
   const h = String(host || '').toLowerCase().replace(/:\d+$/, '');
   if (!h || h === 'localhost' || h.startsWith('[') || /^\d+(\.\d+){3}$/.test(h)) return false;
-  if (!h.includes('.') || h.endsWith('.local') || h.endsWith('.localhost')) return false;
+  if (!h.includes('.') || LAN_SUFFIXES.some((s) => h.endsWith(s))) return false;
   return true;
 }
 

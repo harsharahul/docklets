@@ -144,7 +144,8 @@ test('secureFor marks cookies Secure on public hosts and https, never on LAN or 
   assert.equal(secureFor('0', 'name.docklets.dev', 'https'), false);
   assert.equal(secureFor('auto', '192.168.1.5:8080', 'https'), true);
   assert.equal(secureFor('auto', 'name.docklets.dev', 'http'), true);
-  for (const host of ['192.168.1.5:8080', 'localhost:18080', '127.0.0.1', '[::1]:8080', 'mybox:8080', 'mybox.local', '']) {
+  for (const host of ['192.168.1.5:8080', 'localhost:18080', '127.0.0.1', '[::1]:8080', 'mybox:8080', 'mybox.local', '',
+    'nas.lan', 'box.home.arpa', 'svc.internal:8080', 'pi.localdomain', 'router.home']) {
     assert.equal(secureFor('auto', host, 'http'), false, host);
   }
 });

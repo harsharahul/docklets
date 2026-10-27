@@ -157,6 +157,19 @@ test('an access.json deeper than the slug top is an ordinary file', async () => 
   assert.ok(!fs.existsSync(path.join(root, 'site', 'api', 'access.json')));
 });
 
+test('an access.json that appears during a session survives its finish', async () => {
+  await fullSync([{ path: 'late/index.html', data: 'v1' }]);
+  const data = 'v2';
+  const start = await api('POST', '/sync/start', { body: { files: [
+    { path: 'late/index.html', size: 2, sha256: createHash('sha256').update(data).digest('hex') }] } });
+  const { session } = await start.json();
+  fs.writeFileSync(path.join(root, 'late', 'access.json'), '{"v":1}');
+  await api('PUT', `/sync/file?session=${session}&path=${encodeURIComponent('late/index.html')}`, { raw: data });
+  const fin = await api('POST', '/sync/finish', { body: { session } });
+  assert.equal(fin.status, 200);
+  assert.equal(fs.readFileSync(path.join(root, 'late', 'access.json'), 'utf8'), '{"v":1}');
+});
+
 test('start rejects a malformed public list', async () => {
   for (const pub of ['draft', ['../x'], ['a/b'], [''], [5], ['.hidden']]) {
     const r = await api('POST', '/sync/start', { body: { files: [], public: pub } });

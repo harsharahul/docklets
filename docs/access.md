@@ -79,32 +79,44 @@ Write it with the access command rather than by hand.
 
 ## How it works
 
-The gateway checks every request to a slug that holds an `access.json`
-(Caddy `forward_auth`) with the access service, `bin/access.mjs`. The
-service answers from the policy file and the cookie or bearer token:
+The gateway asks the access service, `bin/access.mjs`, about every request
+under a top-level name (Caddy `forward_auth`). The service reads the
+policy file itself, so what the gateway can or cannot read never changes
+the answer:
 
 | Request | Answer |
 |---|---|
-| valid cookie or `dkl_` bearer token | served |
+| no `access.json` under that name | served (public) |
+| valid cookie or `dkl_` bearer token | served, marked private |
 | a page load (`GET`/`HEAD` accepting HTML) | `303` to `/.docklets/access/login` |
 | anything else | `401` |
 | unreadable or invalid `access.json` | `503`, the slug stays closed |
 
-The access service is never consulted for public slugs, so they keep
-serving if it is down; private slugs fail closed (`502`). The gateway reads
-the slug from the cleaned request path, the same view the file server and
-app routes use, and refuses ambiguous paths (dot segments, double slashes,
-and their encoded forms) with `400`. Responses from private slugs carry
-`Cache-Control: private`, overriding any value an app sets, so shared
-caches and CDNs never store them; the access service's own responses are
+Before asking, the gateway refuses ambiguous paths (dot segments, double
+slashes, and their encoded forms) with `400`, and any top-level name that
+is not lowercase ASCII (`a-z`, `0-9`, `.`, `_`, `-`) with `404`. Slugs are
+lowercase, and the app routes match paths case-insensitively, so a request
+for `/NOTES/` must never reach the app `notes` past a check made for
+`NOTES`. The gateway takes the name from the cleaned path, the same view
+the file server and app routes use.
+
+Responses from private slugs carry `Cache-Control: private`, overriding any
+value an app sets, so shared caches and CDNs never store them; the access
+service's own answers (redirects, the login page, refusals) are
 `no-store`.
+
+**Everything fails closed.** If the access service is down, the gateway
+answers `502` for every request, public slugs included, rather than guess
+which slugs are private.
 
 Where it runs:
 
-- **Self-hosted and tunneled:** the deployer runs it as the
-  `docklets-access` container (read-only root filesystem, the asset root
-  and key mounted read-only, all capabilities dropped) on the internal
-  network. `bin/serve.sh` points the gateway at it.
+- **Self-hosted and tunneled:** `bin/serve.sh` starts it beside the
+  gateway as the `docklets-access` container: read-only root filesystem,
+  the asset root and key mounted read-only, all capabilities dropped,
+  running as your user. It sits on an internal network
+  (`<network>-access`) that only the gateway joins, so app containers
+  cannot reach it.
 - **Container image:** `bin/container-run.sh` starts it on
   `127.0.0.1:9100`, the gateway's default upstream; in a pod the gateway
   shares that localhost.
@@ -139,11 +151,17 @@ Pass `--public <slug>` to remove it. Removing the whole slug removes its
 | `DOCKLETS_ACCESS_MAX_FAILS` | `10` | failed attempts per visitor per 10 minutes |
 | `DOCKLETS_ACCESS_MAX_VERIFIES` | `2` | password checks at once (each scrypt check uses about 16 MB) |
 | `DOCKLETS_ACCESS_UPSTREAM` | `127.0.0.1:9100` | where the gateway finds the access service |
-| `DOCKLETS_ACCESS` | `docklets-access` | the access container's name (deployer, `serve.sh`) |
+| `DOCKLETS_ACCESS` | `docklets-access` | the access container's name (`serve.sh`) |
+| `DOCKLETS_ACCESS_NETWORK` | `<network>-access` | the internal network it shares with the gateway (`serve.sh`) |
 
-The deployer passes the `DOCKLETS_ACCESS_SECURE`, `_CLIENT_HEADER`,
+`bin/serve.sh` passes the `DOCKLETS_ACCESS_SECURE`, `_CLIENT_HEADER`,
 `_MAX_FAILS`, and `_MAX_VERIFIES` values from its own environment to the
-access container.
+access container. Only failed passwords count toward the failure limit; a
+link token is too long to guess, and counting failed redeems would only let
+someone sharing a visitor's address lock them out. Behind a proxy or CDN,
+every visitor arrives from the proxy's address, so set
+`DOCKLETS_ACCESS_CLIENT_HEADER` to the header your edge sets (and that
+visitors cannot forge), or the limit applies to all visitors together.
 
 ## Limits
 

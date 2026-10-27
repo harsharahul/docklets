@@ -13,7 +13,6 @@
  *   DOCKLETS_NETWORK   internal docker network         (default: docklets-net)
  *   DOCKLETS_GATEWAY   gateway container name          (default: docklets-gateway)
  *   DOCKLETS_PREFIX    app container name prefix       (default: docklet-)
- *   DOCKLETS_ACCESS    access service container name   (default: docklets-access)
  *   DOCKLETS_POLL_MS   poll interval                   (default: 7000)
  *   DOCKLETS_DRIVER    app runner: docker | none (status feed only)  (default: docker)
  *   DOCKLETS_MEMORY    per-app memory cap              (default: 512m)
@@ -46,7 +45,6 @@ import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(process.env.DOCKLETS_ROOT || process.cwd());
 const NET = process.env.DOCKLETS_NETWORK || 'docklets-net';
@@ -66,11 +64,6 @@ if (!['docker', 'none'].includes(DRIVER)) {
 const ROUTES = path.join(ROOT, '.gateway', 'routes');
 const DATA = path.join(ROOT, '.data');
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
-const ACCESS_NAME = process.env.DOCKLETS_ACCESS || 'docklets-access';
-const ACCESS_KEY = path.join(ROOT, '.gateway', 'access-key');
-const ACCESS_ENV = ['DOCKLETS_ACCESS_SECURE', 'DOCKLETS_ACCESS_CLIENT_HEADER',
-  'DOCKLETS_ACCESS_MAX_FAILS', 'DOCKLETS_ACCESS_MAX_VERIFIES'];
-const BIN_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const RUNTIMES = {
   node: {
@@ -223,68 +216,6 @@ function isPrivate(slug) {
   return fs.existsSync(path.join(ROOT, slug, 'access.json'));
 }
 
-/** The access service's cookie signing key: 32 random bytes, created once, outside every served path. */
-function ensureAccessKey() {
-  if (fs.existsSync(ACCESS_KEY)) return;
-  fs.mkdirSync(path.dirname(ACCESS_KEY), { recursive: true });
-  try {
-    fs.writeFileSync(ACCESS_KEY, randomBytes(32), { mode: 0o600, flag: 'wx' });
-    log(`access key created at ${ACCESS_KEY}`);
-  } catch (e) { if (e.code !== 'EEXIST') throw e; }
-}
-
-/** Code and settings the access container runs with; a change recreates it. */
-function accessHash() {
-  const h = createHash('sha1');
-  for (const f of ['access.mjs', 'access-core.mjs', 'sync-common.mjs']) {
-    const st = fs.statSync(path.join(BIN_DIR, f));
-    h.update(`${f}:${st.size}:${st.mtimeMs};`);
-  }
-  for (const k of ACCESS_ENV) h.update(`${k}=${process.env[k] ?? ''};`);
-  return h.digest('hex').slice(0, 16);
-}
-
-/**
- * The access service (bin/access.mjs) for private slugs: hardened like an app
- * container, but with the asset root and key mounted read-only, a read-only
- * root filesystem, and its own label so converge never treats it as an app.
- * The gateway reaches it as <ACCESS_NAME>:9100 on the internal network.
- */
-function ensureAccessService() {
-  ensureAccessKey();
-  const hash = accessHash();
-  const cur = docker(['ps', '-a', '--filter', `name=^${ACCESS_NAME}$`,
-    '--format', '{{.Label "docklets-access-hash"}}\t{{.State}}']);
-  const [curHash, state] = cur.split('\t');
-  if (cur && curHash === hash) {
-    if (state !== 'running') { dockerQuiet(['start', ACCESS_NAME]); log(`restarted ${ACCESS_NAME}`); }
-    return;
-  }
-  dockerQuiet(['rm', '-f', ACCESS_NAME]);
-  const envArgs = ACCESS_ENV.filter((k) => process.env[k]).flatMap((k) => ['-e', `${k}=${process.env[k]}`]);
-  docker(['run', '-d', '--name', ACCESS_NAME,
-    '--user', `${process.getuid()}:${process.getgid()}`,
-    '--network', NET,
-    '--restart', 'unless-stopped',
-    '--init',
-    '--read-only',
-    '--tmpfs', '/tmp:rw,mode=1777',
-    '-v', `${ROOT}:/srv:ro`,
-    '-v', `${ACCESS_KEY}:/run/docklets/access-key:ro`,
-    '-v', `${BIN_DIR}:/opt/docklets/bin:ro`,
-    '-e', 'DOCKLETS_ROOT=/srv', '-e', 'DOCKLETS_ACCESS_ADDR=0.0.0.0', '-e', 'DOCKLETS_ACCESS_PORT=9100',
-    '-e', 'DOCKLETS_ACCESS_KEY_FILE=/run/docklets/access-key', ...envArgs,
-    '--label', 'docklets-access-root=' + ROOT,
-    '--label', 'docklets-access-hash=' + hash,
-    '--cap-drop', 'ALL',
-    '--security-opt', 'no-new-privileges',
-    '--pids-limit', '64',
-    '--memory', '128m',
-    RUNTIMES.node.image,
-    'node', '/opt/docklets/bin/access.mjs']);
-  log(`started ${ACCESS_NAME} (hash ${hash})`);
-}
-
 /** A slug is "paused" when its manifest was renamed aside by the admin plane. */
 function isPaused(slug) {
   return fs.existsSync(path.join(ROOT, slug, 'app.json.paused'));
@@ -331,7 +262,6 @@ function converge() {
     writeStatus(desired, new Map());
     return;
   }
-  try { ensureAccessService(); } catch (e) { log('access service:', String(e.message || e).split('\n')[0]); }
   const running = runningApps();
   let routesChanged = false;
 

@@ -24,8 +24,8 @@ http://:8080 {
 	redir @root /status/ 302
 
 	# Everything order-sensitive runs inside this one route block, in written
-	# order: the path guard, the access check for private slugs, the app
-	# routes, then the file server.
+	# order: the path guards, the access check, the app routes, then the file
+	# server.
 	route {
 		# Ambiguous paths (dot segments, double slashes, and their encoded
 		# forms) are refused outright. {http.request.uri.path} is decoded but
@@ -33,25 +33,38 @@ http://:8080 {
 		@noncanon expression `{http.request.uri.path}.matches("//|/\\.\\.?(/|$)")`
 		respond @noncanon "Bad Request" 400
 
+		# Slugs are lowercase ASCII, and the top-level name must be exactly
+		# one: the app routes match paths case-insensitively, so /NOTES/ would
+		# otherwise reach the app "notes" past a check made for "NOTES".
+		@badtop not path_regexp ^/[a-z0-9._-]*(/|$)
+		error @badtop 404
+
 		# Login page, password unlock, and secret-link redeem for private slugs.
 		handle /.docklets/access/* {
 			reverse_proxy {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100}
 		}
 
-		# A slug holding an access.json is private: the access service decides
-		# every request to it. The slug comes from the CLEANED path, the same
-		# view file_server and the app routes use, so the check and the content
-		# can never disagree about which slug a request is for. Public slugs
-		# never reach the access service; private ones fail closed without it.
+		# The access service decides every request under a top-level name: a
+		# slug holding an access.json is private (docs/access.md). The name
+		# comes from the CLEANED path, the same view file_server and the app
+		# routes use, and the service reads the policy itself, so nothing the
+		# gateway can or cannot see changes the answer. Without the service,
+		# every request fails closed.
 		@slugged path_regexp slug ^/([^/]+)
 		route @slugged {
-			@private file /{re.slug.1}/access.json
-			header @private >Cache-Control private
-			forward_auth @private {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100} {
+			request_header -X-Docklets-Access
+			forward_auth {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100} {
 				uri /check?slug={re.slug.1}
+				header_up -Upgrade
+				header_up -Connection
+				copy_headers X-Docklets-Access
 			}
+			# Private responses are never stored by a shared cache.
+			@private header X-Docklets-Access private
+			header @private >Cache-Control private
+			request_header -X-Docklets-Access
 			# A secret-link bearer token is for the gateway, never the app.
-			@linkbearer header_regexp Authorization ^[Bb]earer\s+dkl_
+			@linkbearer header_regexp Authorization (?i)^bearer\s+dkl_
 			request_header @linkbearer -Authorization
 		}
 
@@ -61,7 +74,7 @@ http://:8080 {
 
 		# No `browse`: a directory without index.html 404s instead of listing files.
 		file_server {
-			hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json access.json
+			hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json access.json .access.json.*
 		}
 	}
 

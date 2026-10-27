@@ -66,14 +66,14 @@ confinement, port range, env key pattern); symlinked manifests are ignored.
 
 ## The access service (`bin/access.mjs`)
 
-A slug holding an `access.json` is private. The gateway checks every request
-to it with the access service (Caddy `forward_auth`) and routes
-`/.docklets/access/*` (login page, password unlock, secret-link redeem) to
-it. The decision logic is `bin/access-core.mjs`, pure functions over
-WebCrypto. The deployer runs the service as the hardened, read-only
-`docklets-access` container; in the container image it runs beside the
-receiver on `127.0.0.1:9100`. Public slugs never reach it. Details:
-[access.md](access.md).
+A slug holding an `access.json` is private. The gateway asks the access
+service about every request under a top-level name (Caddy `forward_auth`)
+and routes `/.docklets/access/*` (login page, password unlock, secret-link
+redeem) to it. The decision logic is `bin/access-core.mjs`, pure functions
+over WebCrypto. `bin/serve.sh` runs the service as the hardened, read-only
+`docklets-access` container on an internal network only the gateway joins;
+in the container image it runs beside the receiver on `127.0.0.1:9100`.
+Without it, the gateway fails closed. Details: [access.md](access.md).
 
 ## App containers
 
@@ -99,9 +99,10 @@ exec the entry with `PORT` set from the manifest.
 ```
 client → gateway :8080
            ├── ambiguous path (dot segments, //)  → 400
-           ├── /<private-slug>/...  → forward_auth → access service
-           │                           ├── signed in → continue below
-           │                           └── otherwise → 303 login page / 401
+           ├── top-level name not lowercase ASCII → 404
+           ├── /<name>/...  → forward_auth → access service
+           │                   ├── public, or signed in → continue below
+           │                   └── private, not signed in → 303 login page / 401
            ├── /<static-slug>/...  → file_server from /srv (read-only)
            └── /<docklet-slug>/... → strip prefix → reverse_proxy →
                                      docklet container :PORT (internal network)
