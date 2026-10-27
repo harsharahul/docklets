@@ -99,7 +99,7 @@ exec the entry with `PORT` set from the manifest.
 ```
 client → gateway :8080
            ├── ambiguous path (dot segments, //)  → 400
-           ├── top-level name not lowercase ASCII → 404
+           ├── case variant of an app slug        → 404
            ├── /<name>/...  → forward_auth → access service
            │                   ├── public, or signed in → continue below
            │                   └── private, not signed in → 303 login page / 401

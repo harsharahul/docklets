@@ -183,10 +183,14 @@ jobs:
           [ "$(curl -s -H "Authorization: BEARER $ELINK" "$B/echo/y")" = "echo saw authorization=absent path=/y" ] || fail "upper-case BEARER token reached the app"
           if grep -q '"secret"' "$TESTROOT/.status.json"; then fail "status feed lists a private slug"; fi
 
-          # a top-level name is lowercase ASCII, so case-insensitive app routes cannot be reached past the check
-          for p in '/SECRET/' '/Echo/x' '/ECHO/x' "/$(printf '\xe2\x84\xaa')eys/"; do
-            [ "$(code -H 'Accept: text/html' "$B$p")" = 404 ] || fail "top-level $p not refused"
+          # app routes ignore case, so only an app's exact slug reaches it; static folders keep any name
+          for p in '/Echo/x' '/ECHO/x' "/guestboo$(printf '\xe2\x84\xaa')/api/messages"; do
+            [ "$(code -H 'Accept: text/html' -H "Authorization: Bearer $ELINK" "$B$p")" = 404 ] || fail "app case variant $p not refused"
           done
+          [ "$(curl -s "$B/SECRET/")" != "SECRET CONTENT" ] || fail "case variant served a private slug"
+          mkdir -p "$TESTROOT/My Notes" && echo NOTES > "$TESTROOT/My Notes/index.html"
+          [ "$(curl -s "$B/My%20Notes/")" = "NOTES" ] || fail "a static folder with a capitalized name stopped serving"
+          rm -rf "$TESTROOT/My Notes"
           [ "$(code -H 'Connection: Upgrade' -H 'Upgrade: websocket' "$B/hello-static/")" = 200 ] || fail "upgrade headers break the check"
           if curl -s -D - -o /dev/null "$B/hello-static/" | grep -qi '^cache-control: private'; then fail "public slug marked private"; fi
           # apps never reach the access service; the policy file's mode never matters to the decision

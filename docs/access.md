@@ -95,12 +95,11 @@ the answer:
 | unreadable or invalid `access.json` | `503`, the slug stays closed |
 
 Before asking, the gateway refuses ambiguous paths (dot segments, double
-slashes, and their encoded forms) with `400`, and any top-level name that
-is not lowercase ASCII (`a-z`, `0-9`, `.`, `_`, `-`) with `404`. Slugs are
-lowercase, and the app routes match paths case-insensitively, so a request
-for `/NOTES/` must never reach the app `notes` past a check made for
-`NOTES`. The gateway takes the name from the cleaned path, the same view
-the file server and app routes use.
+slashes, and their encoded forms) with `400`. It takes the name from the
+cleaned path, the same view the file server and app routes use. App routes
+match paths case-insensitively, so each app's route answers only its exact
+slug: `/NOTES/` gets `404` and never reaches the app `notes` past a check
+made for `NOTES`.
 
 Responses from private slugs carry `Cache-Control: private`, overriding any
 value an app sets, so shared caches and CDNs never store them; the access

@@ -127,6 +127,14 @@ test('an access.json the parser rejects fails closed', async () => {
   assert.equal((await check('linked')).status, 503, 'symlinked policy');
 });
 
+test('a case variant of a private slug is not found, never served', async () => {
+  slug('casey', { v: 1 });
+  const caseInsensitiveFs = fs.existsSync(path.join(root, 'CASEY', 'access.json'));
+  const r = await check('CASEY');
+  assert.equal(r.status, caseInsensitiveFs ? 404 : 200, 'on a case-sensitive disk there is simply nothing at CASEY');
+  assert.equal(r.headers.get('x-docklets-access'), null);
+});
+
 test('a segment that is not a single path name is refused', async () => {
   for (const s of ['..', '.', 'a%2Fb', '']) assert.equal((await check(s)).status, 403, s);
 });

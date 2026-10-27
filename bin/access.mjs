@@ -179,6 +179,9 @@ async function check(req, res, u) {
   if (!slug || slug.includes('/') || slug === '.' || slug === '..') return send(res, 403, 'forbidden');
   const st = loadPolicy(slug);
   if (st.public) return send(res, 200);
+  // On a case-insensitive disk /CASEY/ finds casey's policy: a case variant
+  // of a slug is simply not found.
+  if (!SLUG_RE.test(slug) && SLUG_RE.test(slug.toLowerCase())) return send(res, 404, 'not found\n');
   if (st.error || !SLUG_RE.test(slug)) return sendPage(res, 503, invalidPage());
   let key;
   try { key = await accessKey(); } catch (e) {

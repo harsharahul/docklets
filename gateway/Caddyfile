@@ -33,12 +33,6 @@ http://:8080 {
 		@noncanon expression `{http.request.uri.path}.matches("//|/\\.\\.?(/|$)")`
 		respond @noncanon "Bad Request" 400
 
-		# Slugs are lowercase ASCII, and the top-level name must be exactly
-		# one: the app routes match paths case-insensitively, so /NOTES/ would
-		# otherwise reach the app "notes" past a check made for "NOTES".
-		@badtop not path_regexp ^/[a-z0-9._-]*(/|$)
-		error @badtop 404
-
 		# A slug's access policy is never served, by the file server or by an
 		# app that serves its own folder.
 		@policy path_regexp ^/[^/]+/(access\.json|\.access\.json\..*)$

@@ -154,9 +154,9 @@ the gateway can see or read. Design points, in the order a request meets
 them (details in [docs/access.md](docs/access.md)):
 
 - **Path ambiguity is refused before any decision.** Dot segments, double
-  slashes, and their encoded forms answer `400`; a top-level name that is
-  not lowercase ASCII answers `404`, because the app routes match paths
-  case-insensitively. The name is taken from the cleaned path, the same
+  slashes, and their encoded forms answer `400`; a case variant of an app's
+  slug answers `404`, because app routes match paths case-insensitively. The
+  name is taken from the cleaned path, the same
   view the file server and app routes use, so the check and the served
   content can never disagree about which slug a request is for. CI runs a
   bypass matrix (`//slug/`, `/./slug/`, `/x/../slug/`, `/%2e/slug/`,

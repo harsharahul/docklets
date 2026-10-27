@@ -27,7 +27,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   as a `dkl_` bearer token, which the gateway strips before the app. The
   gateway asks a new access service (`bin/access.mjs`, decision logic in
   `bin/access-core.mjs`) about every request through `forward_auth`,
-  refuses ambiguous paths and non-lowercase top-level names, marks private
+  refuses ambiguous paths and case variants of app slugs, marks private
   responses `Cache-Control: private`, and fails closed. Cookies are
   stateless HMACs bound to the credential that issued them, so revoking a
   link or changing the password logs out exactly its visitors. The access
