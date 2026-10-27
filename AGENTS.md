@@ -3,8 +3,9 @@
 > Operator: paste this file (or the parts you want) into your agent's system
 > prompt / standing instructions, and mount the asset root read-write into the
 > agent's sandbox. Replace `<ASSETS>` with the mounted path (e.g.
-> `/workspace/extra/web-assets`) and `<HOST>` with how users reach the gateway
-> (e.g. `http://192.0.2.10:8080` or `https://apps.example.com`).
+> `/workspace/extra/web-assets`), `<HOST>` with how users reach the gateway
+> (e.g. `http://192.0.2.10:8080` or `https://apps.example.com`), and
+> `<DOCKLETS>` with the docklets checkout (the installers fill all three).
 
 ## Web Publishing
 
@@ -27,6 +28,28 @@ Rules:
    move. For small edits, editing in place is fine.
 6. **Tell the user the route** when done: "published at `<HOST>/<slug>/`".
 7. To **unpublish**, remove the slug directory, and only when the user asks.
+
+### Private docklets
+
+A slug is public unless it holds an `access.json`. When the user wants a
+docklet private (a draft, something to share with a few people), run the
+access command from the asset root and give the user what it prints:
+
+```bash
+cd <ASSETS>
+DOCKLETS_PUBLIC_URL=<HOST> node <DOCKLETS>/bin/access.mjs link <slug>   # a secret link
+node <DOCKLETS>/bin/access.mjs password <slug> --generate               # a password, if asked
+node <DOCKLETS>/bin/access.mjs public <slug>                            # public again
+```
+
+- A secret link opens the docklet for whoever holds it; it is shown once.
+  Add `--label` and `--expires 7d` when the user names who it is for or
+  how long it should work. `revoke <slug> <id>` ends one link.
+- Never write or edit `access.json` by hand, and never put a password or a
+  link token in any file.
+- Make a private docklet public only when the user asks.
+- API clients use the link token as `Authorization: Bearer dkl_...`. A
+  public API or webhook must live in a public slug.
 
 ### Dynamic apps (server-side "docklets")
 

@@ -21,6 +21,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Private docklets: a slug holding an `access.json` is private. Visitors
+  get in with a secret link (the token travels in the URL fragment, so it
+  never reaches a server log) or a password; API clients use the link token
+  as a `dkl_` bearer token, which the gateway strips before the app. The
+  gateway asks a new access service (`bin/access.mjs`, decision logic in
+  `bin/access-core.mjs`) about every request through `forward_auth`,
+  refuses ambiguous paths and case variants of app slugs, marks private
+  responses `Cache-Control: private`, and fails closed. Cookies are
+  stateless HMACs bound to the credential that issued them, so revoking a
+  link or changing the password logs out exactly its visitors. The access
+  command (`node bin/access.mjs link | password | revoke | public | list`)
+  writes the file and prints each secret once. `bin/serve.sh` runs the
+  service as a hardened read-only container on an internal network only the
+  gateway joins; the container image starts it beside the receiver. The
+  sync receiver keeps a slug's `access.json` that a session
+  omits (`--public <slug>` removes it), and `/healthz` advertises the
+  feature. Private slugs are left out of the public status feed.
+  Documented in `docs/access.md`; CI runs the full flow and a path-bypass
+  matrix against the real gateway.
 - Folder sync (`bin/sync.mjs` + `bin/receiver.mjs`): mirror a local folder
   to another machine over HTTPS. The client fingerprints files with sha256
   and uploads only changes; the receiver stages uploads, verifies every

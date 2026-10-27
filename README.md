@@ -334,6 +334,21 @@ a docklet. The agent publishes straight to your hosted name through the same
 sync receiver, with no folder, CLI, or token on your side. Steps for each app
 are at [docklets.dev/connect](https://docklets.dev/connect).
 
+## Private docklets
+
+Drop an `access.json` into a slug and it is private: visitors get in with a
+secret link (the token rides in the URL fragment, so it never reaches a
+server log) or a password, and API clients with a `dkl_` bearer token.
+Static sites and apps alike, on every tier. The access command writes the
+file and prints each secret once:
+
+```bash
+node bin/access.mjs link drafts --label "for Acme" --expires 7d
+node bin/access.mjs password drafts --generate
+```
+
+Details: [docs/access.md](docs/access.md).
+
 ## Sync and containers
 
 `bin/sync.mjs` mirrors a folder to another machine running the sync
@@ -375,7 +390,7 @@ tail -f <root>/.gateway/logs/deployer.log
 - Per-app egress policy (offline-by-default apps, allowlisted hosts)
 - Read-only app rootfs once dependency install moves to a build step
 - More runtimes (bun, deno, static binaries)
-- Optional basic-auth / OIDC on the gateway
+- Per-user access to private docklets (sign-in plus allowlists)
 - Subdomain-per-app mode (origin isolation between apps)
 
 ## License

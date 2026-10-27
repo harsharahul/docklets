@@ -43,7 +43,7 @@ jobs:
           echo "TESTROOT=$TESTROOT" >> "$GITHUB_ENV"
           cp -R examples/guestbook examples/hello-static "$TESTROOT"/
           DOCKLETS_ROOT="$TESTROOT" DOCKLETS_PORT=8081 DOCKLETS_DETACH=1 \
-            DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw ./bin/serve.sh
+            DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_ACCESS=dk-ci-access ./bin/serve.sh
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://127.0.0.1:8081/ && break; sleep 2
           done
@@ -117,6 +117,98 @@ jobs:
           docker inspect dk-ci-guestbook \
             --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}}' | \
             grep -q 'ALL.*map\[\]'
+          docker inspect dk-ci-access \
+            --format '{{.HostConfig.CapDrop}} {{.HostConfig.PortBindings}} ro={{.HostConfig.ReadonlyRootfs}}' | \
+            grep -q 'ALL.*map\[\] ro=true'
+      - name: Verify private docklets
+        run: |
+          B=http://127.0.0.1:8081
+          fail() { echo "::error::$1"; docker logs dk-ci-access 2>&1 | tail -20; docker logs dk-ci-gw 2>&1 | tail -10; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' --path-as-is "$@"; }
+          export DOCKLETS_ROOT="$TESTROOT"
+          mkdir -p "$TESTROOT/secret" "$TESTROOT/echo"
+          echo 'SECRET CONTENT' > "$TESTROOT/secret/index.html"
+          printf '{ "runtime": "node", "entry": "server.js", "port": 3000 }\n' > "$TESTROOT/echo/app.json"
+          cat > "$TESTROOT/echo/server.js" <<'JS'
+          require('node:http').createServer((req, res) => {
+            res.writeHead(200, { 'content-type': 'text/plain', 'cache-control': 'public, max-age=600' });
+            res.end(`echo saw authorization=${req.headers.authorization ? 'present' : 'absent'} path=${req.url}`);
+          }).listen(Number(process.env.PORT));
+          JS
+          LINK=$(node bin/access.mjs link secret | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)
+          printf 'correct horse battery\n' | node bin/access.mjs password secret
+          ELINK=$(node bin/access.mjs link echo | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)
+          [ -n "$LINK" ] && [ -n "$ELINK" ] || fail "access CLI minted no links"
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            node bin/deployer.mjs --once
+          for i in $(seq 1 30); do [ "$(code -H "Authorization: Bearer $ELINK" "$B/echo/")" = 200 ] && break; sleep 2; done
+
+          # a browser page load goes to the login page; an API call gets 401
+          H="$(curl -s -D - -o /dev/null -H 'Accept: text/html' "$B/secret/page.html")"
+          echo "$H" | grep -q '^HTTP/1.1 303' || fail "private slug not redirected: $H"
+          echo "$H" | grep -qi '^location: /.docklets/access/login?slug=secret&return=%2Fsecret%2Fpage.html' || fail "wrong login location: $H"
+          echo "$H" | grep -qi '^cache-control: no-store' || fail "redirect is cacheable"
+          [ "$(code -H 'Accept: application/json' "$B/secret/")" = 401 ] || fail "API request not 401"
+          [ "$(code "$B/.docklets/access/login?slug=secret&return=%2Fsecret%2F")" = 200 ] || fail "login page"
+
+          # a secret link and the password each open it; access.json is never served
+          J="$RUNNER_TEMP/jar"
+          curl -s -c "$J" -o /dev/null --data-urlencode slug=secret --data-urlencode "token=$LINK" \
+            --data-urlencode return=/secret/ "$B/.docklets/access/redeem"
+          [ "$(curl -s -b "$J" -D "$RUNNER_TEMP/h" "$B/secret/")" = "SECRET CONTENT" ] || fail "link cookie does not open the slug"
+          grep -qi '^cache-control: private' "$RUNNER_TEMP/h" || fail "private content is shared-cacheable"
+          [ "$(code -b "$J" "$B/secret/access.json")" = 404 ] || fail "access.json served to an unlocked visitor"
+          [ "$(code -H 'Accept: text/html' "$B/secret/access.json")" = 404 ] || fail "access.json not refused"
+          rm -f "$J"
+          curl -s -c "$J" -o /dev/null --data-urlencode slug=secret --data-urlencode 'password=correct horse battery' \
+            --data-urlencode return=/secret/ "$B/.docklets/access/unlock"
+          [ "$(curl -s -b "$J" "$B/secret/")" = "SECRET CONTENT" ] || fail "password cookie does not open the slug"
+
+          # no path form reaches private content without a credential
+          for p in '//secret/' '/./secret/' '/x/../secret/' '/hello-static/../secret/' '/%2e/secret/' '/%2Fsecret/' '/hello-static%2F..%2Fsecret/'; do
+            c="$(code "$B$p")"; b="$(curl -s --path-as-is "$B$p")"
+            { [ "$c" = 400 ] || [ "$c" = 303 ]; } && [ "$b" != "SECRET CONTENT" ] || fail "bypass $p answered $c"
+          done
+          for p in '/%73ecret/' '/secret' '/secret%2Findex.html'; do
+            [ "$(code -H 'Accept: text/html' "$B$p")" = 303 ] || fail "$p not locked"
+          done
+          [ "$(code -I -H 'Accept: text/html' "$B/secret/")" = 303 ] || fail "HEAD not locked"
+
+          # a private app: a dkl_ bearer opens it and never reaches the app; other bearers do not open it
+          [ "$(curl -s -H "Authorization: Bearer $ELINK" -D "$RUNNER_TEMP/h2" "$B/echo/x")" = "echo saw authorization=absent path=/x" ] \
+            || fail "bearer link did not open the app, or reached it"
+          grep -qi '^cache-control: private' "$RUNNER_TEMP/h2" || fail "app's public cache header not overridden"
+          [ "$(code -H "Authorization: Bearer $ELINK" "$B/echo/access.json")" = 404 ] || fail "an app could serve its access.json"
+          [ "$(code -H 'Authorization: Bearer app-own-token' -H 'Accept: application/json' "$B/echo/x")" = 401 ] || fail "non-link bearer opened a private app"
+          [ "$(curl -s -H "Authorization: BEARER $ELINK" "$B/echo/y")" = "echo saw authorization=absent path=/y" ] || fail "upper-case BEARER token reached the app"
+          if grep -q '"secret"' "$TESTROOT/.status.json"; then fail "status feed lists a private slug"; fi
+
+          # app routes ignore case, so only an app's exact slug reaches it; static folders keep any name
+          for p in '/Echo/x' '/ECHO/x' "/guestboo$(printf '\xe2\x84\xaa')/api/messages"; do
+            [ "$(code -H 'Accept: text/html' -H "Authorization: Bearer $ELINK" "$B$p")" = 404 ] || fail "app case variant $p not refused"
+          done
+          [ "$(curl -s "$B/SECRET/")" != "SECRET CONTENT" ] || fail "case variant served a private slug"
+          mkdir -p "$TESTROOT/My Notes" && echo NOTES > "$TESTROOT/My Notes/index.html"
+          [ "$(curl -s "$B/My%20Notes/")" = "NOTES" ] || fail "a static folder with a capitalized name stopped serving"
+          rm -rf "$TESTROOT/My Notes"
+          [ "$(code -H 'Connection: Upgrade' -H 'Upgrade: websocket' "$B/hello-static/")" = 200 ] || fail "upgrade headers break the check"
+          if curl -s -D - -o /dev/null "$B/hello-static/" | grep -qi '^cache-control: private'; then fail "public slug marked private"; fi
+          # apps never reach the access service; the policy file's mode never matters to the decision
+          docker exec dk-ci-echo node -e "fetch('http://dk-ci-access:9100/check?slug=secret').then(()=>process.exit(1),()=>process.exit(0))" \
+            || fail "an app container reached the access service"
+          chmod 600 "$TESTROOT/secret/access.json"
+          [ "$(code -H 'Accept: text/html' "$B/secret/")" = 303 ] || fail "a 0600 access.json does not lock"
+          [ "$(curl -s -b "$J" "$B/secret/")" = "SECRET CONTENT" ] || fail "a 0600 access.json does not open with a cookie"
+
+          # without the access service, everything fails closed
+          docker stop dk-ci-access >/dev/null
+          [ "$(code "$B/hello-static/")" = 502 ] || fail "public slug did not fail closed"
+          [ "$(code -b "$J" "$B/secret/")" = 502 ] || fail "private slug did not fail closed"
+          docker start dk-ci-access >/dev/null
+          for i in $(seq 1 15); do [ "$(code "$B/hello-static/")" = 200 ] && break; sleep 1; done
+          rm -rf "$TESTROOT/secret" "$TESTROOT/echo" "$J"
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
+            node bin/deployer.mjs --once
       - name: Verify status feed and dashboard
         run: |
           test -f "$TESTROOT/.status.json"
@@ -149,7 +241,7 @@ jobs:
             echo "::error::root still lists slugs"; exit 1
           fi
           # agent instruction files in the root are never served publicly
-          sed -e "s|<ASSETS>|$TESTROOT|g" -e "s|<HOST>|http://127.0.0.1:8081|g" AGENTS.md | grep -v '^>' > "$TESTROOT/AGENTS.md"
+          sed -e "s|<ASSETS>|$TESTROOT|g" -e "s|<HOST>|http://127.0.0.1:8081|g" -e "s|<DOCKLETS>|$PWD|g" AGENTS.md | grep -v '^>' > "$TESTROOT/AGENTS.md"
           ln -s AGENTS.md "$TESTROOT/CLAUDE.md"
           [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/AGENTS.md)" = "404" ] \
             || { echo "::error::AGENTS.md publicly served"; exit 1; }
@@ -305,9 +397,9 @@ jobs:
       - name: Teardown
         if: always()
         run: |
-          docker rm -f dk-ci-gw 2>/dev/null || true
+          docker rm -f dk-ci-gw dk-ci-access 2>/dev/null || true
           docker ps -aq --filter label=docklet | xargs -r docker rm -f
-          docker network rm dk-ci 2>/dev/null || true
+          docker network rm dk-ci dk-ci-access 2>/dev/null || true
 
   hosted:
     name: Hosted stack end to end
@@ -340,6 +432,10 @@ jobs:
           printf 'bindPort = 7000\nvhostHTTPPort = 8090\nsubdomainHost = "docklets.test"\nauth.method = "token"\nauth.token = "ci-token"\n' > /tmp/frps.toml
           "/tmp/frp_${FRP_VERSION}_linux_amd64/frps" -c /tmp/frps.toml > /tmp/frps.log 2>&1 &
           printf 'TUNNEL_SERVER=dk-ci-host\nTUNNEL_PORT=7000\nTUNNEL_TOKEN=ci-token\nTUNNEL_NAME=hosted-ci\nLOCAL_PORT=8080\n' > /tmp/connector.env
+          # the gateway's routes dir exists before the runtime starts, writable by
+          # the runtime too (its access service keeps its key beside the routes)
+          mkdir -p "$HR/.gateway/routes" && chmod 777 "$HR/.gateway"
+          printf '# placeholder so the routes glob always matches\n' > "$HR/.gateway/routes/00-placeholder.caddy"
           docker run -d --name dk-ci-rt \
             --add-host dk-ci-host:host-gateway \
             -p 127.0.0.1:19000:9000 \
@@ -351,8 +447,6 @@ jobs:
             -e DOCKLETS_SYNC_TOKEN_HASH_FILE=/etc/docklets/sync-hash \
             -e DOCKLETS_SYNC_TOKEN_HASH_FILES=/etc/docklets/agent-hash \
             dk-ci-hosted
-          mkdir -p "$HR/.gateway/routes"
-          printf '# placeholder so the routes glob always matches\n' > "$HR/.gateway/routes/00-placeholder.caddy"
           docker run -d --name dk-ci-pod-gw --network container:dk-ci-rt \
             -v "$HR":/srv:ro \
             -v "$PWD/gateway/Caddyfile":/etc/caddy/Caddyfile:ro \
@@ -387,6 +481,15 @@ jobs:
             || { echo "::error::dot-entry was readable"; exit 1; }
           # the seeded dashboard answers, and the status feed marks app folders pending
           curl -sf -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/status/ | grep -q docklets
+          # a private slug synced into the pod locks through the pod's own access service
+          mkdir "$L/draft" && echo 'DRAFT' > "$L/draft/index.html"
+          DLINK="$(DOCKLETS_ROOT="$L" node bin/access.mjs link draft | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)"
+          DOCKLETS_SYNC_URL=http://127.0.0.1:19000 DOCKLETS_SYNC_TOKEN="$TOKEN" node bin/sync.mjs "$L"
+          H="$(curl -s -D - -o /dev/null -H 'Host: hosted-ci.docklets.test' -H 'Accept: text/html' http://127.0.0.1:8090/draft/)"
+          echo "$H" | grep -q '^HTTP/1.1 303' \
+            || { echo "::error::synced private slug not locked: $H"; docker logs dk-ci-rt 2>&1 | tail -20; exit 1; }
+          [ "$(curl -s -H 'Host: hosted-ci.docklets.test' -H "Authorization: Bearer $DLINK" http://127.0.0.1:8090/draft/)" = "DRAFT" ] \
+            || { echo "::error::a link token does not open the synced private slug"; exit 1; }
           mkdir "$L/my-app"
           printf '{"runtime":"node","entry":"s.js","port":3000}' > "$L/my-app/app.json"
           printf '// app\n' > "$L/my-app/s.js"

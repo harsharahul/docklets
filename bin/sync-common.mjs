@@ -5,7 +5,7 @@
  * the sync token is stored (scrypt hash; the plaintext exists only client
  * side and in flight).
  */
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -62,17 +62,34 @@ export function scryptHash(token) {
   return `scrypt$${SCRYPT_N}$${salt.toString('base64url')}$${key.toString('base64url')}`;
 }
 
+function parseScrypt(stored) {
+  const [tag, n, salt, key] = String(stored).trim().split('$');
+  if (tag !== 'scrypt') return null;
+  // Two wire encodings exist for salt and key: this repo mints base64url
+  // (22-char salt), managed control planes store hex (32-char salt).
+  // Salt shape discriminates unambiguously.
+  const enc = /^[0-9a-f]{32}$/.test(salt) ? 'hex' : 'base64url';
+  const want = Buffer.from(key, enc);
+  if (want.length !== KEY_LEN) return null;
+  return { want, salt: Buffer.from(salt, enc),
+    opts: { N: Number(n), r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 } };
+}
+
 export function scryptVerify(token, stored) {
   try {
-    const [tag, n, salt, key] = String(stored).trim().split('$');
-    if (tag !== 'scrypt') return false;
-    // Two wire encodings exist for salt and key: this repo mints base64url
-    // (22-char salt), managed control planes store hex (32-char salt).
-    // Salt shape discriminates unambiguously.
-    const enc = /^[0-9a-f]{32}$/.test(salt) ? 'hex' : 'base64url';
-    const want = Buffer.from(key, enc);
-    const got = scryptSync(token, Buffer.from(salt, enc), want.length,
-      { N: Number(n), r: SCRYPT_R, p: SCRYPT_P, maxmem: 64 * 1024 * 1024 });
-    return want.length === KEY_LEN && timingSafeEqual(want, got);
+    const s = parseScrypt(stored);
+    return !!s && timingSafeEqual(s.want, scryptSync(token, s.salt, KEY_LEN, s.opts));
   } catch { return false; }
+}
+
+/** scryptVerify off the event loop (libuv pool), for servers that must keep answering. */
+export function scryptVerifyAsync(token, stored) {
+  return new Promise((resolve) => {
+    let s;
+    try { s = parseScrypt(stored); } catch { s = null; }
+    if (!s) return resolve(false);
+    try {
+      scrypt(token, s.salt, KEY_LEN, s.opts, (err, got) => resolve(!err && timingSafeEqual(s.want, got)));
+    } catch { resolve(false); }
+  });
 }

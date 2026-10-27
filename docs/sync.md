@@ -25,6 +25,13 @@ direction:
 A `404.html` at the folder root syncs like any other file, so a custom
 not-found page works on the far side.
 
+A slug's `access.json` (which makes it private, see [access.md](access.md))
+syncs like any other file, with one exception: leaving it out never makes a
+docklet public. If it exists only on the receiver and the slug still has
+other files in the manifest, the receiver keeps it and reports it as
+`kept`. Name the slug with `--public` to remove it; removing the whole slug
+removes it too.
+
 ## Client
 
 ```sh
@@ -40,6 +47,7 @@ node bin/sync.mjs ~/my-folder
 | `DOCKLETS_SYNC_TOKEN_FILE` | read the token from a file instead |
 | `--dry-run` | report what would upload and what would be deleted, change nothing |
 | `--yes` | required to sync an empty folder (which deletes everything remote) |
+| `--public <slug>` | make a slug public: remove its `access.json` on the receiver even though the local folder has none (repeatable) |
 
 The client fingerprints every file with sha256 and uploads only what the
 receiver does not already have; unchanged files cost nothing.
@@ -85,18 +93,23 @@ always be readable.
 ## Protocol
 
 Six endpoints, all JSON except file bodies. Every request except
-`GET /healthz` carries `Authorization: Bearer <token>`.
+`GET /healthz` carries `Authorization: Bearer <token>`. `GET /healthz`
+answers `{"ok":true,"features":["access"]}`; a writer checks `features`
+before relying on the `access.json` keep rule.
 
-1. `POST /sync/start` with `{"files":[{"path","size","sha256"}, ...]}`.
-   Answers `{"session","need":[paths],"extraneous":[paths]}`: what to
-   upload, and what the mirror will delete. One session at a time; a
-   stale session (10 minutes) is discarded automatically.
+1. `POST /sync/start` with `{"files":[{"path","size","sha256"}, ...]}`,
+   plus an optional `"public":[slugs]`. Answers
+   `{"session","need":[paths],"extraneous":[paths],"kept":[paths]}`: what
+   to upload, what the mirror will delete, and which `<slug>/access.json`
+   files it keeps although the manifest omits them. One session at a time;
+   a stale session (10 minutes) is discarded automatically.
 2. `PUT /sync/file?session=S&path=P` with the raw file body. The receiver
    verifies size and sha256 while writing; a mismatch discards the upload
    (422). Files land in a hidden staging area, invisible to serving.
 3. `POST /sync/finish` with `{"session"}`. Only now does the live folder
    change: staged files move into place, files absent from the manifest
-   are deleted, empty directories are pruned. During this step the
+   are deleted (except the kept `access.json` files), empty directories
+   are pruned. During this step the
    receiver holds `.sync-lock`, which the deployer's converge pass honors,
    so a half-applied sync is never deployed. Answers
    `{"ok",added,updated,deleted,bytes}`.

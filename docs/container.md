@@ -18,6 +18,7 @@ and the writing container without a public port.
 | Process | Runs when |
 |---|---|
 | deployer | always; `DOCKLETS_DRIVER` defaults to `none` in the container (status feed only, no app containers) |
+| access | always, on `127.0.0.1:9100`: the gateway's default upstream for private slugs (see docs/access.md); its key is created under `<root>/.gateway/` |
 | receiver | `DOCKLETS_SYNC_TOKEN_HASH_FILE` is set |
 | connector | the file named by `DOCKLETS_CONNECTOR_CONFIG` (default `/etc/docklets/connector.env`) exists |
 
@@ -34,6 +35,7 @@ kubernetes, systemd) restart it.
 | `DOCKLETS_SYNC_TOKEN_HASH_FILES` | unset | colon-separated extra hash files for additional writers |
 | `DOCKLETS_RECEIVER_ADDR` | `0.0.0.0` | receiver listen address inside the container |
 | `DOCKLETS_CONNECTOR_CONFIG` | `/etc/docklets/connector.env` | connector config (see docs/tunnel.md) |
+| `DOCKLETS_ACCESS_SECURE` | `auto` | `1` marks access cookies `Secure` regardless of the host (set it when the folder is only ever served over https) |
 
 ## Compose example
 

@@ -102,13 +102,14 @@ test('upload round trip: need list, sha verification, staged invisibly', async (
   await api('POST', '/sync/abort', { body: { session } });
 });
 
-async function fullSync(files) {
+async function fullSync(files, extra = {}) {
   const start = await api('POST', '/sync/start', { body: { files: files.map(({ path: p, data }) => ({
     path: p, size: Buffer.byteLength(data),
     sha256: createHash('sha256').update(data).digest('hex'),
-  })) } });
+  })), ...extra } });
   assert.equal(start.status, 200);
-  const { session, need } = await start.json();
+  const startBody = await start.json();
+  const { session, need } = startBody;
   for (const p of need) {
     const f = files.find((x) => x.path === p);
     const r = await api('PUT', `/sync/file?session=${session}&path=${encodeURIComponent(p)}`, { raw: f.data });
@@ -116,8 +117,65 @@ async function fullSync(files) {
   }
   const fin = await api('POST', '/sync/finish', { body: { session } });
   assert.equal(fin.status, 200);
-  return fin.json();
+  return { ...(await fin.json()), start: startBody };
 }
+
+test('healthz advertises access support', async () => {
+  const h = await (await fetch(base + '/healthz')).json();
+  assert.ok(h.features.includes('access'));
+});
+
+test('a sync that omits a slug\'s access.json keeps the slug private', async () => {
+  await fullSync([{ path: 'draft/index.html', data: 'v1' }, { path: 'draft/access.json', data: '{"v":1}' }]);
+  const s = await fullSync([{ path: 'draft/index.html', data: 'v2' }]);
+  assert.deepEqual(s.start.kept, ['draft/access.json']);
+  assert.ok(!s.start.extraneous.includes('draft/access.json'));
+  assert.equal(s.deleted, 0);
+  assert.equal(fs.readFileSync(path.join(root, 'draft', 'access.json'), 'utf8'), '{"v":1}');
+  assert.equal(fs.readFileSync(path.join(root, 'draft', 'index.html'), 'utf8'), 'v2');
+});
+
+test('only an explicit public list removes a kept access.json', async () => {
+  await fullSync([{ path: 'draft/index.html', data: 'v1' }, { path: 'draft/access.json', data: '{"v":1}' }]);
+  const s = await fullSync([{ path: 'draft/index.html', data: 'v1' }], { public: ['draft'] });
+  assert.deepEqual(s.start.kept, []);
+  assert.ok(s.start.extraneous.includes('draft/access.json'));
+  assert.ok(!fs.existsSync(path.join(root, 'draft', 'access.json')));
+});
+
+test('removing a whole slug removes its access.json with it', async () => {
+  await fullSync([{ path: 'draft/index.html', data: 'v1' }, { path: 'draft/access.json', data: '{"v":1}' }]);
+  const s = await fullSync([{ path: 'other.txt', data: 'x' }]);
+  assert.deepEqual(s.start.kept, []);
+  assert.ok(!fs.existsSync(path.join(root, 'draft')));
+});
+
+test('an access.json deeper than the slug top is an ordinary file', async () => {
+  await fullSync([{ path: 'site/index.html', data: 'v1' }, { path: 'site/api/access.json', data: '{}' }]);
+  const s = await fullSync([{ path: 'site/index.html', data: 'v1' }]);
+  assert.deepEqual(s.start.kept, []);
+  assert.ok(!fs.existsSync(path.join(root, 'site', 'api', 'access.json')));
+});
+
+test('an access.json that appears during a session survives its finish', async () => {
+  await fullSync([{ path: 'late/index.html', data: 'v1' }]);
+  const data = 'v2';
+  const start = await api('POST', '/sync/start', { body: { files: [
+    { path: 'late/index.html', size: 2, sha256: createHash('sha256').update(data).digest('hex') }] } });
+  const { session } = await start.json();
+  fs.writeFileSync(path.join(root, 'late', 'access.json'), '{"v":1}');
+  await api('PUT', `/sync/file?session=${session}&path=${encodeURIComponent('late/index.html')}`, { raw: data });
+  const fin = await api('POST', '/sync/finish', { body: { session } });
+  assert.equal(fin.status, 200);
+  assert.equal(fs.readFileSync(path.join(root, 'late', 'access.json'), 'utf8'), '{"v":1}');
+});
+
+test('start rejects a malformed public list', async () => {
+  for (const pub of ['draft', ['../x'], ['a/b'], [''], [5], ['.hidden']]) {
+    const r = await api('POST', '/sync/start', { body: { files: [], public: pub } });
+    assert.equal(r.status, 400, JSON.stringify(pub));
+  }
+});
 
 test('finish applies the mirror: adds, updates, deletes, prunes empty dirs', async () => {
   let s = await fullSync([
