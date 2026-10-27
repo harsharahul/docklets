@@ -127,3 +127,15 @@ test('a failed health check rolls back to the release that was running', async (
     assert.deepEqual(f.installs().map((l) => l.split(' ')[0]), ['0.5.0', '0.4.0']);
   } finally { gw.close(); }
 });
+
+test('a rollback puts a checkout that followed main back on main', async () => {
+  const f = fixture();
+  git(f.src, 'checkout', '-q', '-B', 'main', 'v0.4.0');
+  const gw = await gateway({ code: 502 });
+  try {
+    const r = await run(f, [], gw.url);
+    assert.notEqual(r.code, 0);
+    assert.equal(git(f.src, 'symbolic-ref', '--short', 'HEAD'), 'main');
+    assert.equal(f.versionOf(), '0.4.0');
+  } finally { gw.close(); }
+});

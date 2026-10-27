@@ -53,11 +53,11 @@ if [ ! -f "$SRC/bin/deployer.mjs" ]; then
   # from release to release after that.
   RELEASE="$(git ls-remote --tags --refs "$REPO_URL" 'v*' 2>/dev/null \
     | sed -n 's|.*refs/tags/\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' \
-    | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1)"
+    | sort -t. -k1.2,1n -k2,2n -k3,3n | tail -n 1 || true)"
   say "Fetching docklets ${RELEASE:-(main)} into $SRC ..."
   mkdir -p "$(dirname "$SRC")"
   if [ -n "$RELEASE" ]; then
-    git clone -q --depth 1 --branch "$RELEASE" "$REPO_URL" "$SRC" 2>/dev/null
+    git clone -q --depth 1 --branch "$RELEASE" "$REPO_URL" "$SRC"
   else
     git clone -q --depth 1 "$REPO_URL" "$SRC"
   fi

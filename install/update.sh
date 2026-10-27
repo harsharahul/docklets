@@ -59,9 +59,12 @@ healthy() { # $1 url, $2 seconds
 # The connector is a service only when its config exists; then it must be up.
 services_running() {
   [ -f "$HOME/.config/docklets/connector.env" ] || return 0
+  local out
   case "$(uname -s)" in
-    Darwin) launchctl print "gui/$(id -u)/com.docklets.connector" 2>/dev/null | grep -q 'state = running' ;;
-    *)      systemctl --user is-active --quiet docklets-connector ;;
+    Darwin)
+      out="$(launchctl print "gui/$(id -u)/com.docklets.connector" 2>/dev/null || true)"
+      case "$out" in *"state = running"*) return 0 ;; *) return 1 ;; esac ;;
+    *) systemctl --user is-active --quiet docklets-connector ;;
   esac
 }
 
@@ -104,11 +107,14 @@ main() {
   done < "$conf/install.env"
   [ -n "$root" ] && [ -n "$port" ] || { fail "$conf/install.env is missing DOCKLETS_ROOT or DOCKLETS_PORT"; return 1; }
 
-  # One update at a time; a lock left by a run that died is taken over.
+  # One update at a time; a lock left by a run that died (its pid gone, or
+  # older than two hours, in case the pid was reused) is taken over.
   local lock="$conf/update.lock" pid
   if ! mkdir "$lock" 2>/dev/null; then
     pid="$(cat "$lock/pid" 2>/dev/null || true)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then log "another update is running"; return 0; fi
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ -z "$(find "$lock" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
+      log "another update is running"; return 0
+    fi
     rm -rf "$lock"; mkdir "$lock"
   fi
   echo $$ > "$lock/pid"
@@ -138,7 +144,12 @@ main() {
     log "updated docklets $current -> $latest"
     return 0
   fi
-  git -C "$src" checkout -q --detach "$prev"
+  # Back to where it was: on main if it followed main, else the old commit.
+  if [ -n "$branch" ] && [ "$(git -C "$src" rev-parse "$branch")" = "$prev" ]; then
+    git -C "$src" checkout -q "$branch"
+  else
+    git -C "$src" checkout -q --detach "$prev"
+  fi
   if install; then
     log "health check failed; rolled back to $current"
   else
