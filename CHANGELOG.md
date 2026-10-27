@@ -6,6 +6,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
+### Upgrading
+
+- Self-hosted and tunneled: pull, then re-run the installer (or restart the
+  gateway service) so `bin/serve.sh` starts the new access service beside
+  the gateway. Every request now passes through it, and the gateway answers
+  `502` without it.
+- Compose: the gateway joins the docklets container's network
+  (`network_mode: "service:docklets"`), as in the updated example in
+  `docs/container.md`, so it reaches the access service on `127.0.0.1:9100`.
+
 ### Fixed
 
 - Sync receiver: a top-level `lost+found` is reserved like `status`, so it
