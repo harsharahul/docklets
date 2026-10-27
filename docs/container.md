@@ -43,24 +43,26 @@ Static serving plus sync on one host:
 
 ```yaml
 services:
+  docklets:
+    build: .
+    environment:
+      DOCKLETS_ROOT: /folder
+      DOCKLETS_SYNC_TOKEN_HASH_FILE: /etc/docklets/sync-hash
+    ports: ["8080:8080", "127.0.0.1:9000:9000"]
+    volumes:
+      - ./folder:/folder
+      - ./sync-hash:/etc/docklets/sync-hash:ro
   gateway:
     image: caddy:2.11-alpine
-    ports: ["8080:8080"]
+    # Shares the docklets container's network, as in a pod, so it reaches
+    # the access service on 127.0.0.1:9100 (docs/access.md).
+    network_mode: "service:docklets"
     volumes:
       - ./folder:/srv:ro
       - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./folder/.gateway/routes:/etc/caddy/routes:ro
     read_only: true
     tmpfs: [/tmp, /data, /config]
-  docklets:
-    build: .
-    environment:
-      DOCKLETS_ROOT: /folder
-      DOCKLETS_SYNC_TOKEN_HASH_FILE: /etc/docklets/sync-hash
-    ports: ["127.0.0.1:9000:9000"]
-    volumes:
-      - ./folder:/folder
-      - ./sync-hash:/etc/docklets/sync-hash:ro
 ```
 
 Create `folder/.gateway/routes/00-placeholder.caddy` once (any comment
