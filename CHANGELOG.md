@@ -6,6 +6,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The deployer no longer floods its logs while Docker is stopped. Passes that
+  cannot reach Docker back off from the poll interval up to 5 minutes
+  (`DOCKLETS_MAX_BACKOFF_MS`) and return to normal on the first good pass; a
+  failure is logged when its reason or the wait changes, recovery is logged
+  once, and the Docker CLI's error text is folded into that line instead of
+  being written to the error log on every pass. Failures that are not about
+  reaching Docker keep the normal interval.
+
 ## [0.5.0] - 2026-10-27
 
 ### Upgrading

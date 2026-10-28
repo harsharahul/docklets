@@ -64,6 +64,14 @@ seconds, or exactly once with `--once`):
 Manifests are validated before anything runs (slug pattern, entry path
 confinement, port range, env key pattern); symlinked manifests are ignored.
 
+When `docker ps` fails (Docker stopped, socket gone), each following pass
+waits twice as long as the last, up to 5 minutes (`DOCKLETS_MAX_BACKOFF_MS`),
+and the loop returns to its normal interval as soon as a pass succeeds. Other
+failures, such as an app that cannot start, keep the normal interval so a fix
+deploys promptly. A failure is logged when its reason or the wait changes, and
+recovery is logged once; the Docker CLI's own error text goes into that line
+instead of straight to the error log.
+
 ## The access service (`bin/access.mjs`)
 
 A slug holding an `access.json` is private. The gateway asks the access

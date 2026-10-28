@@ -14,7 +14,8 @@
  *   DOCKLETS_GATEWAY   gateway container name          (default: docklets-gateway)
  *   DOCKLETS_PREFIX    app container name prefix       (default: docklet-)
  *   DOCKLETS_POLL_MS   poll interval                   (default: 7000)
- *   DOCKLETS_DRIVER    app runner: docker | none (status feed only)  (default: docker)
+ *   DOCKLETS_MAX_BACKOFF_MS  longest wait while Docker is unreachable  (default: 300000)
+ *   DOCKLETS_DRIVER   app runner: docker | none (status feed only)  (default: docker)
  *   DOCKLETS_MEMORY    per-app memory cap              (default: 512m)
  *   DOCKLETS_PIDS      per-app pid cap                 (default: 256)
  *
@@ -51,6 +52,7 @@ const NET = process.env.DOCKLETS_NETWORK || 'docklets-net';
 const GATEWAY = process.env.DOCKLETS_GATEWAY || 'docklets-gateway';
 const PREFIX = process.env.DOCKLETS_PREFIX || 'docklet-';
 const POLL_MS = Number(process.env.DOCKLETS_POLL_MS || 7000);
+const MAX_BACKOFF_MS = Math.max(POLL_MS, Number(process.env.DOCKLETS_MAX_BACKOFF_MS || 300000));
 const MEMORY = process.env.DOCKLETS_MEMORY || '512m';
 const PIDS = process.env.DOCKLETS_PIDS || '256';
 const ONCE = process.argv.includes('--once');
@@ -80,8 +82,15 @@ const RUNTIMES = {
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
+/** docker call whose output matters. The CLI's stderr is captured into the
+ *  thrown error (see reason()) instead of passing through to the log. */
 function docker(args, opts = {}) {
-  return execFileSync('docker', args, { encoding: 'utf8', ...opts }).trim();
+  return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
+}
+
+/** First line of why a command failed: the docker CLI's own message when it gave one. */
+function reason(e) {
+  return (String(e?.stderr || '').trim() || String(e?.message || e)).split('\n')[0];
 }
 
 /** docker call where a non-zero exit is expected/benign (rm of absent, create of existing). */
@@ -137,8 +146,14 @@ function desiredApps() {
 }
 
 function runningApps() {
-  const out = docker(['ps', '-a', '--filter', `label=docklet-root=${ROOT}`,
-    '--format', '{{.Names}}\t{{.Label "docklet-hash"}}\t{{.Label "docklet-port"}}\t{{.State}}\t{{.Status}}']);
+  let out;
+  try {
+    out = docker(['ps', '-a', '--filter', `label=docklet-root=${ROOT}`,
+      '--format', '{{.Names}}\t{{.Label "docklet-hash"}}\t{{.Label "docklet-port"}}\t{{.State}}\t{{.Status}}']);
+  } catch (e) {
+    e.dockerUnreachable = true; // nothing can converge until docker answers again
+    throw e;
+  }
   const map = new Map();
   for (const line of out ? out.split('\n') : []) {
     const [name, hash, port, state, statusText] = line.split('\t');
@@ -213,7 +228,7 @@ function reloadGateway() {
   try {
     docker(['exec', GATEWAY, 'caddy', 'reload', '--config', '/etc/caddy/Caddyfile']);
     log('gateway reloaded');
-  } catch (e) { log('gateway reload FAILED:', String(e.message || e).split('\n')[0]); }
+  } catch (e) { log('gateway reload FAILED:', reason(e)); }
 }
 
 /** A slug is private when it holds an access.json; the gateway asks the access service about it. */
@@ -441,7 +456,31 @@ if (DRIVER === 'docker') dockerQuiet(['network', 'create', NET]);
 
 log(`docklets deployer starting; root=${ROOT} net=${NET} gateway=${GATEWAY}${ONCE ? ' (single pass)' : ''}`);
 if (ADMIN_PORT) startAdmin();
+// While docker is unreachable (stopped, socket gone) each wait doubles, up to
+// MAX_BACKOFF_MS; any other failure keeps the normal interval so a fixed app
+// redeploys promptly. A failure is logged when its reason or the wait
+// changes, and recovery once, so an outage cannot flood the logs.
+const formatMs = (ms) => (ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`);
+let failures = 0;
+let unreachable = 0;
+let reported = '';
 do {
-  try { converge(); } catch (e) { log('converge error:', String(e.message || e).split('\n')[0]); }
-  if (!ONCE) await new Promise((r) => setTimeout(r, POLL_MS));
+  let wait = POLL_MS;
+  try {
+    // docker may have come back without the network (fresh VM, reset)
+    if (DRIVER === 'docker' && unreachable) dockerQuiet(['network', 'create', NET]);
+    converge();
+    if (failures) log(`converge recovered after ${failures} failed pass${failures === 1 ? '' : 'es'}`);
+    failures = 0;
+    unreachable = 0;
+    reported = '';
+  } catch (e) {
+    failures += 1;
+    unreachable = e.dockerUnreachable ? unreachable + 1 : 0;
+    if (unreachable) wait = Math.min(POLL_MS * 2 ** (unreachable - 1), MAX_BACKOFF_MS);
+    const line = `converge error: ${reason(e)}${ONCE ? '' : `; next pass in ${formatMs(wait)}`}`;
+    if (line !== reported) log(line);
+    reported = line;
+  }
+  if (!ONCE) await new Promise((r) => setTimeout(r, wait));
 } while (!ONCE);
