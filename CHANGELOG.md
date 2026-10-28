@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-28
+
 ### Fixed
 
 - The deployer no longer floods its logs while Docker is stopped. Passes that
