@@ -121,3 +121,30 @@ test('a wrong token fails with a clear message', () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /unauthorized/i);
 });
+
+test('DOCKLETS_SYNC_TENANT addresses one folder of a cell receiver', async () => {
+  const cellRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-synccell-'));
+  const hashDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-synccellh-'));
+  fs.writeFileSync(path.join(hashDir, 'alpha-site'), execFileSync(process.execPath, [RECEIVER, '--hash', TOKEN], { encoding: 'utf8' }));
+  const cell = spawn(process.execPath, [RECEIVER], {
+    env: { ...process.env, DOCKLETS_ROOT: cellRoot, DOCKLETS_SYNC_HASH_DIR: hashDir, DOCKLETS_RECEIVER_PORT: '0' },
+  });
+  try {
+    const url = await new Promise((resolve, reject) => {
+      let out = '';
+      cell.stdout.on('data', (d) => { out += d; const m = out.match(/receiver listening on (http:\/\/[^\s]+)/); if (m) resolve(m[1]); });
+      setTimeout(() => reject(new Error(`no listen line: ${out}`)), 5000);
+    });
+    const local = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-synccelll-'));
+    fs.mkdirSync(path.join(local, 'site'));
+    fs.writeFileSync(path.join(local, 'site', 'index.html'), 'cell page');
+    const run = (env) => spawnSync(process.execPath, [SYNC, local], {
+      encoding: 'utf8', env: { ...process.env, DOCKLETS_SYNC_URL: url, DOCKLETS_SYNC_TOKEN: TOKEN, ...env },
+    });
+    const without = run({});
+    assert.notEqual(without.status, 0, 'a cell sync without a tenant succeeded');
+    const r = run({ DOCKLETS_SYNC_TENANT: 'alpha-site' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(fs.readFileSync(path.join(cellRoot, 'alpha-site', 'site', 'index.html'), 'utf8'), 'cell page');
+  } finally { cell.kill(); }
+});

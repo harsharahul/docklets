@@ -14,21 +14,31 @@
 }
 
 http://:8080 {
-	# One folder per gateway by default; a gateway serving many folders
-	# (one per host) sets DOCKLETS_CADDY_ROOT to a placeholder path.
+	# One folder per gateway by default. A gateway serving one folder per
+	# host (a cell) sets DOCKLETS_CADDY_ROOT to /srv/{http.request.host.labels.2}
+	# and DOCKLETS_HOST_GUARD to the hosts it serves (a regular expression on
+	# the Host header), so any other host, a deeper subdomain included, finds
+	# nothing instead of the folder its labels happen to name.
 	root * {$DOCKLETS_CADDY_ROOT:/srv}
 	encode gzip
 
 	# The bare root redirects to the status dashboard instead of listing every
 	# slug. Individual routes still resolve; there is no public file index. The
 	# installers deploy the dashboard to /status/ so this target always exists.
-	@root path /
+	@root {
+		path /
+		header_regexp Host {$DOCKLETS_HOST_GUARD:.*}
+	}
 	redir @root /status/ 302
 
 	# Everything order-sensitive runs inside this one route block, in written
 	# order: the path guards, the access check, the app routes, then the file
 	# server.
 	route {
+		# A host the gateway does not serve finds nothing (see DOCKLETS_HOST_GUARD).
+		@foreignhost not header_regexp Host {$DOCKLETS_HOST_GUARD:.*}
+		error @foreignhost 404
+
 		# Ambiguous paths (dot segments, double slashes, and their encoded
 		# forms) are refused outright. {http.request.uri.path} is decoded but
 		# not cleaned, so this sees what the cleaned matchers below never do.
@@ -42,7 +52,11 @@ http://:8080 {
 
 		# Login page, password unlock, and secret-link redeem for private slugs.
 		handle /.docklets/access/* {
-			reverse_proxy {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100}
+			# The access service learns which folder a request is about from the
+			# host (a cell keeps one per host; a single folder ignores the header).
+			reverse_proxy {$DOCKLETS_ACCESS_UPSTREAM:127.0.0.1:9100} {
+				header_up X-Docklets-Tenant {http.request.host.labels.2}
+			}
 		}
 
 		# The access service decides every request under a top-level name: a
@@ -58,6 +72,7 @@ http://:8080 {
 				uri /check?slug={re.slug.1}
 				header_up -Upgrade
 				header_up -Connection
+				header_up X-Docklets-Tenant {http.request.host.labels.2}
 				copy_headers X-Docklets-Access
 			}
 			# Private responses are never stored by a shared cache.

@@ -20,6 +20,12 @@
  *                                  (default: first X-Forwarded-For entry)
  *   DOCKLETS_ACCESS_MAX_FAILS      failed attempts per client per 10 minutes (default: 10)
  *   DOCKLETS_ACCESS_MAX_VERIFIES   concurrent password checks      (default: 2)
+ *   DOCKLETS_ACCESS_MULTI_ROOT     "1": one folder per tenant under the root (a cell); the
+ *                                  tenant comes from X-Docklets-Tenant, which the gateway
+ *                                  sets from the host, and each tenant keeps its own
+ *                                  policies, cookie key (<root>/<tenant>/.gateway/access-key)
+ *                                  and failure limits. A request without a valid tenant is
+ *                                  refused.
  *
  * CLI (writes <root>/<slug>/access.json; secrets are printed once, stored hashed):
  *   node access.mjs link <slug> [--label TEXT] [--expires 30m|12h|7d]
@@ -42,6 +48,8 @@ const ROOT = path.resolve(process.env.DOCKLETS_ROOT || process.cwd());
 const ADDR = process.env.DOCKLETS_ACCESS_ADDR || '127.0.0.1';
 const PORT = Number(process.env.DOCKLETS_ACCESS_PORT ?? 9100);
 const KEY_FILE = process.env.DOCKLETS_ACCESS_KEY_FILE || path.join(ROOT, '.gateway', 'access-key');
+const MULTI = process.env.DOCKLETS_ACCESS_MULTI_ROOT === '1';
+const TENANT_RE = /^[a-z0-9](?:[a-z0-9-]{0,39}[a-z0-9])?$/;
 const SECURE = process.env.DOCKLETS_ACCESS_SECURE || 'auto';
 const CLIENT_HEADER = (process.env.DOCKLETS_ACCESS_CLIENT_HEADER || '').toLowerCase();
 const MAX_FAILS = Number(process.env.DOCKLETS_ACCESS_MAX_FAILS || 10);
@@ -56,18 +64,41 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 /* ------------------------------------------------------------------------- *
- * Policy files
+ * Spaces: the folder a request is about, with its own policy cache and
+ * cookie key. One space for a single folder; one per tenant in a cell.
  * ------------------------------------------------------------------------- */
 
-const policyCache = new Map();
+const makeSpace = (name, root, keyFile) => ({ name, root, keyFile, keyPromise: null, policyCache: new Map() });
+const SINGLE = makeSpace('', ROOT, KEY_FILE);
+const spaces = new Map();
+
+/** The space for this request, or null when a cell request names no valid tenant. */
+function spaceFor(req) {
+  if (!MULTI) return SINGLE;
+  const name = String(req.headers['x-docklets-tenant'] ?? '');
+  if (!TENANT_RE.test(name)) return null;
+  let sp = spaces.get(name);
+  if (!sp) {
+    const root = path.join(ROOT, name);
+    sp = makeSpace(name, root, path.join(root, '.gateway', 'access-key'));
+    if (spaces.size > 10_000) spaces.clear();
+    spaces.set(name, sp);
+  }
+  return sp;
+}
+
+/* ------------------------------------------------------------------------- *
+ * Policy files
+ * ------------------------------------------------------------------------- */
 
 /**
  * { public: true } | { policy } | { error }, for the top-level name `seg`
  * (a slug folder, or a root file whose path has no access.json under it).
  * A file that is not a plain regular file, or that cannot be read, is an error.
  */
-function loadPolicy(seg) {
-  const p = path.join(ROOT, seg, ACCESS_FILE);
+function loadPolicy(space, seg) {
+  const policyCache = space.policyCache;
+  const p = path.join(space.root, seg, ACCESS_FILE);
   let st;
   try { st = fs.lstatSync(p); } catch (e) {
     return e.code === 'ENOENT' || e.code === 'ENOTDIR' ? { public: true } : { error: 'unreadable' };
@@ -81,7 +112,7 @@ function loadPolicy(seg) {
     const r = parsePolicy(fs.readFileSync(p, 'utf8'));
     result = r.ok ? { policy: r.policy } : { error: r.error };
   } catch { result = { error: 'unreadable' }; }
-  if (result.error) log(`${seg}/${ACCESS_FILE} is invalid (${result.error}); it stays closed`);
+  if (result.error) log(`${space.name ? space.name + ': ' : ''}${seg}/${ACCESS_FILE} is invalid (${result.error}); it stays closed`);
   policyCache.set(seg, { stamp, result });
   return result;
 }
@@ -90,23 +121,21 @@ function loadPolicy(seg) {
  * Cookie signing key: 32 random bytes, created once, never served or synced
  * ------------------------------------------------------------------------- */
 
-let keyPromise = null;
-
-function accessKey() {
-  if (!keyPromise) keyPromise = loadKey().catch((e) => { keyPromise = null; throw e; });
-  return keyPromise;
+function accessKey(space) {
+  if (!space.keyPromise) space.keyPromise = loadKey(space.keyFile).catch((e) => { space.keyPromise = null; throw e; });
+  return space.keyPromise;
 }
 
-async function loadKey() {
+async function loadKey(keyFile) {
   let bytes;
-  try { bytes = fs.readFileSync(KEY_FILE); } catch (e) {
+  try { bytes = fs.readFileSync(keyFile); } catch (e) {
     if (e.code !== 'ENOENT') throw e;
-    fs.mkdirSync(path.dirname(KEY_FILE), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 });
     try {
-      fs.writeFileSync(KEY_FILE, randomBytes(32), { mode: 0o600, flag: 'wx' });
-      log(`access key created at ${KEY_FILE}`);
+      fs.writeFileSync(keyFile, randomBytes(32), { mode: 0o600, flag: 'wx' });
+      log(`access key created at ${keyFile}`);
     } catch (e2) { if (e2.code !== 'EEXIST') throw e2; }
-    bytes = fs.readFileSync(KEY_FILE);
+    bytes = fs.readFileSync(keyFile);
   }
   if (bytes.length < 32) throw new Error('access key is shorter than 32 bytes');
   return importAccessKey(bytes);
@@ -163,9 +192,9 @@ function readForm(req) {
   });
 }
 
-async function setCookieFor(req, slug, cred, policy) {
+async function setCookieFor(req, space, slug, cred, policy) {
   const now = nowSec();
-  const value = await mintCookie(await accessKey(), slug, cred, policy, now);
+  const value = await mintCookie(await accessKey(space), slug, cred, policy, now);
   if (!value) return null;
   const maxAge = Number(value.split('.')[2]) - now;
   const secure = secureFor(SECURE, req.headers['x-forwarded-host'] || req.headers.host, req.headers['x-forwarded-proto']);
@@ -175,16 +204,18 @@ async function setCookieFor(req, slug, cred, policy) {
 // The gateway asks about every request under a top-level name, so the
 // decision never depends on what the gateway itself can see or read.
 async function check(req, res, u) {
+  const space = spaceFor(req);
+  if (!space) return send(res, 403, 'forbidden');
   const slug = u.searchParams.get('slug') || '';
   if (!slug || slug.includes('/') || slug === '.' || slug === '..') return send(res, 403, 'forbidden');
-  const st = loadPolicy(slug);
+  const st = loadPolicy(space, slug);
   if (st.public) return send(res, 200);
   // On a case-insensitive disk /CASEY/ finds casey's policy: a case variant
   // of a slug is simply not found.
   if (!SLUG_RE.test(slug) && SLUG_RE.test(slug.toLowerCase())) return send(res, 404, 'not found\n');
   if (st.error || !SLUG_RE.test(slug)) return sendPage(res, 503, invalidPage());
   let key;
-  try { key = await accessKey(); } catch (e) {
+  try { key = await accessKey(space); } catch (e) {
     log(`access key unavailable (${e.message}); private slugs stay closed`);
     return sendPage(res, 503, invalidPage());
   }
@@ -199,18 +230,22 @@ async function check(req, res, u) {
 }
 
 async function unlockOrRedeem(req, res, kind) {
+  const space = spaceFor(req);
+  if (!space) { req.resume(); return send(res, 403, 'forbidden'); }
   const r = await readForm(req);
   if (!r.form) return send(res, r.code);
   const slug = r.form.get('slug') || '';
   if (!SLUG_RE.test(slug)) return send(res, 400, 'bad slug');
   const ret = safeReturn(slug, r.form.get('return'));
-  const st = loadPolicy(slug);
+  const st = loadPolicy(space, slug);
   if (st.public) return redirect(res, ret);
   if (st.error) return sendPage(res, 503, invalidPage());
   // Only password guesses count toward the failure limit. A link token has
   // 256 bits; counting failed redeems would only let anyone sharing a
   // visitor's address lock them out.
-  const who = clientOf(req);
+  // Failure limits are per tenant: a visitor locked out of one tenant's
+  // docklet is not locked out of another's.
+  const who = `${space.name}\n${clientOf(req)}`;
   if (kind === 'unlock' && limited(who)) return redirect(res, loginWith(slug, ret, 'limit'));
 
   let cred = null;
@@ -233,7 +268,7 @@ async function unlockOrRedeem(req, res, kind) {
     if (kind === 'unlock') recordFailure(who);
     return redirect(res, loginWith(slug, ret, kind === 'unlock' ? 'password' : 'link'));
   }
-  const cookie = await setCookieFor(req, slug, cred, st.policy);
+  const cookie = await setCookieFor(req, space, slug, cred, st.policy);
   if (!cookie) return redirect(res, loginWith(slug, ret, 'link'));
   return redirect(res, ret, { 'Set-Cookie': cookie });
 }
@@ -306,10 +341,12 @@ function sendPage(res, code, html) {
 }
 
 function login(req, res, u) {
+  const space = spaceFor(req);
+  if (!space) return send(res, 403, 'forbidden');
   const slug = u.searchParams.get('slug') || '';
   if (!SLUG_RE.test(slug)) return send(res, 400, 'bad slug');
   const ret = safeReturn(slug, u.searchParams.get('return'));
-  const st = loadPolicy(slug);
+  const st = loadPolicy(space, slug);
   if (st.public) return redirect(res, ret);
   if (st.error) return sendPage(res, 503, invalidPage());
   return sendPage(res, 200, loginPage(slug, ret, st.policy, u.searchParams.get('e')));
@@ -325,7 +362,7 @@ async function handle(req, res) {
 }
 
 function serve() {
-  accessKey().catch((e) => log(`access key unavailable (${e.message}); private slugs stay closed until it is`));
+  if (!MULTI) accessKey(SINGLE).catch((e) => log(`access key unavailable (${e.message}); private slugs stay closed until it is`));
   const server = http.createServer((req, res) => {
     handle(req, res).catch((e) => {
       log('request error:', String(e.message || e));
@@ -334,7 +371,7 @@ function serve() {
   });
   server.listen(PORT, ADDR, () => {
     const a = server.address();
-    console.log(`access listening on http://${a.address}:${a.port} (root ${ROOT})`);
+    console.log(`access listening on http://${a.address}:${a.port} (root ${ROOT}${MULTI ? ', one folder per tenant' : ''})`);
   });
 }
 
@@ -414,7 +451,7 @@ async function cli(cmd, args) {
   if (cmd === 'list') {
     for (const e of fs.readdirSync(ROOT, { withFileTypes: true })) {
       if (!e.isDirectory() || !SLUG_RE.test(e.name)) continue;
-      const st = loadPolicy(e.name);
+      const st = loadPolicy(SINGLE, e.name);
       if (st.public) continue;
       if (st.error) { console.log(`${e.name.padEnd(24)} invalid (${st.error})`); continue; }
       const ids = st.policy.links.map((l) => l.id + (l.label ? ` "${l.label}"` : '')).join(', ');
