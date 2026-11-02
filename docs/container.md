@@ -22,6 +22,12 @@ and the writing container without a public port.
 | receiver | `DOCKLETS_SYNC_TOKEN_HASH_FILE` is set |
 | connector | the file named by `DOCKLETS_CONNECTOR_CONFIG` (default `/etc/docklets/connector.env`) exists |
 
+With `DOCKLETS_CELL=1` the container serves a cell instead: one folder per
+tenant under `DOCKLETS_ROOT`, the receiver in cell mode (it needs
+`DOCKLETS_SYNC_HASH_DIR`, see docs/sync.md) and the access service keyed by
+tenant. No deployer and no connector run; a cell serves files and worker
+slugs only.
+
 If any process exits, the container exits; let the supervisor (compose,
 kubernetes, systemd) restart it.
 
@@ -37,7 +43,9 @@ kubernetes, systemd) restart it.
 | `DOCKLETS_CONNECTOR_CONFIG` | `/etc/docklets/connector.env` | connector config (see docs/tunnel.md) |
 | `DOCKLETS_ACCESS_SECURE` | `auto` | `1` marks access cookies `Secure` regardless of the host (set it when the folder is only ever served over https) |
 | `DOCKLETS_WORKER_UPSTREAM` | `127.0.0.1:9200` | host:port of a worker host for slugs with `"runtime": "worker"` (read by the gateway's Caddyfile); with nothing listening, such a slug answers the readable 502 page |
-| `DOCKLETS_CADDY_ROOT` | `/srv` | the gateway's document root; a gateway serving one folder per host sets a placeholder path |
+| `DOCKLETS_CADDY_ROOT` | `/srv` | the gateway's document root; a cell's gateway sets `/srv/{http.request.host.labels.2}` (one folder per host) |
+| `DOCKLETS_HOST_GUARD` | `.*` | a regular expression the request's Host must match before the gateway answers anything; a cell's gateway sets the hosts it serves, for example `^[a-z0-9-]+\.docklets\.dev(:[0-9]+)?$`, so a deeper or foreign host never reaches a folder its labels happen to name |
+| `DOCKLETS_CELL` | unset | `1` runs the container as a cell (above) |
 
 ## Compose example
 

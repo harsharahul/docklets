@@ -566,8 +566,72 @@ jobs:
           done
           curl -s -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/.status.json | grep -q '"wk"' \
             || { echo "::error::worker slug missing from the status feed"; exit 1; }
+      - name: Serve two tenants from one cell (receiver and access per tenant, root per host)
+        run: |
+          C="$(mktemp -d)" && mkdir -p "$C/srv" "$C/hashes" "$C/routes" && chmod 777 "$C/srv"
+          printf '# placeholder\n' > "$C/routes/00-placeholder.caddy"
+          TA="dksync-alpha-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          TB="dksync-bravo-$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          node bin/receiver.mjs --hash "$TA" > "$C/hashes/alpha-site"
+          node bin/receiver.mjs --hash "$TB" > "$C/hashes/bravo-site"
+          docker network create dk-ci-cellnet >/dev/null
+          docker run -d --name dk-ci-cellstub --network dk-ci-cellnet node:20-alpine node -e '
+            require("node:http").createServer((req, res) => { res.writeHead(200, {"content-type":"application/json"}); res.end(JSON.stringify({ url: req.url, tenant: req.headers["x-docklets-tenant"], slug: req.headers["x-docklets-slug"] })); }).listen(9200, "0.0.0.0");'
+          docker run -d --name dk-ci-cell --network dk-ci-cellnet -p 127.0.0.1:19100:9000 -p 127.0.0.1:18096:8080 \
+            -e DOCKLETS_CELL=1 -e DOCKLETS_ROOT=/srv -e DOCKLETS_SYNC_HASH_DIR=/etc/docklets/hashes \
+            -v "$C/srv":/srv -v "$C/hashes":/etc/docklets/hashes:ro dk-ci-hosted
+          docker run -d --name dk-ci-cell-gw --network container:dk-ci-cell \
+            -e 'DOCKLETS_CADDY_ROOT=/srv/{http.request.host.labels.2}' \
+            -e 'DOCKLETS_HOST_GUARD=^[a-z0-9-]+\.docklets\.test(:[0-9]+)?$' \
+            -e DOCKLETS_WORKER_UPSTREAM=dk-ci-cellstub:9200 \
+            -v "$C/srv":/srv:ro -v "$PWD/gateway/Caddyfile":/etc/caddy/Caddyfile:ro -v "$C/routes":/etc/caddy/routes:ro \
+            --read-only --tmpfs /tmp --tmpfs /data --tmpfs /config caddy:2.11-alpine
+          B=http://127.0.0.1:18096; R=http://127.0.0.1:19100
+          for i in $(seq 1 30); do curl -sf -o /dev/null $R/healthz && break; sleep 1; done
+          fail() { echo "::error::$1"; docker logs dk-ci-cell 2>&1 | tail -20; docker logs dk-ci-cell-gw 2>&1 | tail -10; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          HA=(-H 'Host: alpha-site.docklets.test'); HB=(-H 'Host: bravo-site.docklets.test')
+          curl -s $R/healthz | grep -q '"cell"' || fail "the receiver does not advertise cell mode"
+          # alpha: hello, a private draft, a worker slug; bravo: hello, its own private draft, open
+          mkdir -p "$C/la/draft" "$C/la/hello" "$C/la/api" "$C/lb/draft" "$C/lb/hello" "$C/lb/open"
+          echo 'ALPHA DRAFT' > "$C/la/draft/index.html"; echo 'ALPHA HELLO' > "$C/la/hello/index.html"
+          printf '{"runtime":"worker","entry":"worker.js"}' > "$C/la/api/app.json"; printf '//\n' > "$C/la/api/worker.js"
+          echo 'BRAVO DRAFT' > "$C/lb/draft/index.html"; echo 'BRAVO HELLO' > "$C/lb/hello/index.html"; echo 'BRAVO OPEN' > "$C/lb/open/index.html"
+          LA="$(DOCKLETS_ROOT="$C/la" node bin/access.mjs link draft | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)"
+          LB="$(DOCKLETS_ROOT="$C/lb" node bin/access.mjs link draft | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)"
+          DOCKLETS_SYNC_URL=$R DOCKLETS_SYNC_TOKEN="$TA" DOCKLETS_SYNC_TENANT=alpha-site node bin/sync.mjs "$C/la" || fail "alpha sync failed"
+          DOCKLETS_SYNC_URL=$R DOCKLETS_SYNC_TOKEN="$TB" DOCKLETS_SYNC_TENANT=bravo-site node bin/sync.mjs "$C/lb" || fail "bravo sync failed"
+          if DOCKLETS_SYNC_URL=$R DOCKLETS_SYNC_TOKEN="$TA" DOCKLETS_SYNC_TENANT=bravo-site node bin/sync.mjs "$C/la" 2>/dev/null; then fail "alpha's token wrote bravo's folder"; fi
+          [ "$(curl -s "${HA[@]}" $B/hello/)" = "ALPHA HELLO" ] || fail "alpha host did not serve alpha's folder"
+          [ "$(curl -s "${HB[@]}" $B/hello/)" = "BRAVO HELLO" ] || fail "bravo host did not serve bravo's folder"
+          [ "$(code "${HA[@]}" $B/open/)" = 404 ] || fail "a bravo-only slug answered on alpha"
+          # any host the cell does not serve finds nothing, a deeper subdomain of a tenant included
+          [ "$(code -H 'Host: evil.alpha-site.docklets.test' $B/hello/)" = 404 ] || fail "a deeper host reached alpha's folder"
+          [ "$(code -H 'Host: alpha-site.example.org' $B/hello/)" = 404 ] || fail "a foreign host reached alpha's folder"
+          [ "$(code -H 'Host: alpha-site.example.org' $B/)" = 404 ] || fail "a foreign host got the root redirect"
+          # private docklets stay per tenant: links, cookies, and keys
+          [ "$(code "${HA[@]}" -H 'Accept: text/html' $B/draft/)" = 303 ] || fail "alpha's draft did not send a browser to login"
+          [ "$(curl -s "${HA[@]}" -H "Authorization: Bearer $LA" $B/draft/)" = "ALPHA DRAFT" ] || fail "alpha's link did not open alpha's draft"
+          [ "$(code "${HB[@]}" -H "Authorization: Bearer $LA" -H 'Accept: application/json' $B/draft/)" = 401 ] || fail "alpha's link opened bravo's draft"
+          [ "$(curl -s "${HB[@]}" -H "Authorization: Bearer $LB" $B/draft/)" = "BRAVO DRAFT" ] || fail "bravo's link did not open bravo's draft"
+          CK="$(curl -s -D - -o /dev/null "${HA[@]}" --data-urlencode slug=draft --data-urlencode "token=$LA" --data-urlencode return=/draft/ $B/.docklets/access/redeem | grep -i '^set-cookie' | sed -E 's/^[Ss]et-[Cc]ookie: ([^;]+);.*/\1/' | tr -d '\r')"
+          [ "$(curl -s -H "Cookie: $CK" "${HA[@]}" $B/draft/)" = "ALPHA DRAFT" ] || fail "a redeemed cookie did not open alpha's draft"
+          [ "$(code -H "Cookie: $CK" "${HB[@]}" -H 'Accept: text/html' $B/draft/)" = 303 ] || fail "alpha's cookie opened bravo's draft"
+          docker exec dk-ci-cell sh -c 'cmp -s /srv/alpha-site/.gateway/access-key /srv/bravo-site/.gateway/access-key' && fail "two tenants share a cookie key"
+          # worker slugs route with the tenant taken from the host
+          [ "$(curl -s "${HA[@]}" $B/api/x | node -pe 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); j.url+" "+j.tenant+" "+j.slug')" = "/x alpha-site api" ] || fail "worker slug did not route with its tenant"
+          [ "$(code "${HB[@]}" $B/api/x)" = 404 ] || fail "alpha's worker slug answered on bravo"
+          # each tenant has its own dashboard and status feed
+          curl -s "${HA[@]}" $B/status/ | grep -q docklets || fail "no per-tenant dashboard"
+          [ "$(curl -s "${HA[@]}" $B/.status.json | node -pe 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); j.static.join(",")+"|"+j.apps.map(a=>a.slug).join(",")')" = "hello|api" ] || fail "alpha's status feed is wrong"
+          # purge takes one tenant's folder, with that tenant's credential only
+          [ "$(code -X POST -H 'X-Docklets-Tenant: alpha-site' -H "Authorization: Bearer $TB" $R/sync/purge)" = 401 ] || fail "purge accepted another tenant's token"
+          [ "$(code -X POST -H 'X-Docklets-Tenant: alpha-site' -H "Authorization: Bearer $TA" $R/sync/purge)" = 200 ] || fail "purge refused the tenant's own token"
+          [ "$(code "${HA[@]}" $B/hello/)" = 404 ] || fail "a purged tenant still serves"
+          [ "$(curl -s "${HB[@]}" $B/hello/)" = "BRAVO HELLO" ] || fail "purging alpha touched bravo"
       - name: Teardown
         if: always()
         run: |
-          docker rm -f dk-ci-pod-gw dk-ci-rt 2>/dev/null || true
+          docker rm -f dk-ci-pod-gw dk-ci-rt dk-ci-cell-gw dk-ci-cell dk-ci-cellstub 2>/dev/null || true
+          docker network rm dk-ci-cellnet 2>/dev/null || true
           pkill -f 'frps -c /tmp/frps.toml' || true
