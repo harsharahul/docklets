@@ -8,6 +8,9 @@
 #              private slugs; its key lives under <root>/.gateway/)
 #   receiver   when DOCKLETS_SYNC_TOKEN_HASH_FILE is set
 #   connector  when the connector config file exists
+# A cell (DOCKLETS_CELL=1) serves one folder per tenant under the root:
+# the receiver in cell mode (DOCKLETS_SYNC_HASH_DIR) and the access service
+# keyed by tenant, no deployer and no connector.
 # If any process exits, the container exits and the supervisor restarts it.
 set -euo pipefail
 
@@ -16,6 +19,15 @@ ROOT="${DOCKLETS_ROOT:?DOCKLETS_ROOT is required}"
 export DOCKLETS_DRIVER="${DOCKLETS_DRIVER:-none}"
 export DOCKLETS_CONNECTOR_HOME="${DOCKLETS_CONNECTOR_HOME:-/opt/docklets/connector-home}"
 CONNECTOR_CONF="${DOCKLETS_CONNECTOR_CONFIG:-/etc/docklets/connector.env}"
+
+if [ "${DOCKLETS_CELL:-0}" = "1" ]; then
+  : "${DOCKLETS_SYNC_HASH_DIR:?DOCKLETS_SYNC_HASH_DIR is required for a cell}"
+  DOCKLETS_ACCESS_MULTI_ROOT=1 node /opt/docklets/bin/access.mjs &
+  DOCKLETS_RECEIVER_ADDR="${DOCKLETS_RECEIVER_ADDR:-0.0.0.0}" \
+    node /opt/docklets/bin/receiver.mjs &
+  wait -n
+  exit $?
+fi
 
 node /opt/docklets/bin/deployer.mjs &
 node /opt/docklets/bin/access.mjs &
