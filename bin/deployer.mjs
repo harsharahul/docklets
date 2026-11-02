@@ -123,16 +123,27 @@ function readManifest(slug) {
   try { m = JSON.parse(fs.readFileSync(p, 'utf8')); } catch {
     log(`SKIP ${slug}: app.json is not valid JSON`); return null;
   }
-  if (!RUNTIMES[m.runtime]) { log(`SKIP ${slug}: unsupported runtime "${m.runtime}" (${Object.keys(RUNTIMES).join('|')})`); return null; }
-  const port = Number(m.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) { log(`SKIP ${slug}: bad port`); return null; }
+  // The worker runtime (docs/manifest.md) needs no port: a worker host
+  // serves it behind the gateway's marker route, not a container here.
+  const worker = m.runtime === 'worker';
+  if (!worker && !RUNTIMES[m.runtime]) { log(`SKIP ${slug}: unsupported runtime "${m.runtime}" (${Object.keys(RUNTIMES).join('|')}|worker)`); return null; }
+  const port = worker ? null : Number(m.port);
+  if (!worker && (!Number.isInteger(port) || port < 1 || port > 65535)) { log(`SKIP ${slug}: bad port`); return null; }
   const entry = String(m.entry || '');
   if (!entry || entry.includes('..') || path.isAbsolute(entry)) { log(`SKIP ${slug}: bad entry`); return null; }
   const env = m.env && typeof m.env === 'object' ? m.env : {};
   for (const k of Object.keys(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) { log(`SKIP ${slug}: bad env key ${k}`); return null; }
   }
-  return { runtime: m.runtime, entry, port, env, install: !!m.install };
+  return { runtime: m.runtime, entry, port, env, install: !worker && !!m.install };
+}
+
+// Worker slugs are noted once per process, not on every pass.
+const notedWorkers = new Set();
+function noteWorker(slug) {
+  if (notedWorkers.has(slug)) return;
+  notedWorkers.add(slug);
+  log(`${slug}: worker runtime runs on hosted docklets; this deployer has no worker runtime yet`);
 }
 
 function desiredApps() {
@@ -261,7 +272,7 @@ function writeStatus(desired, running) {
     if (!e.isDirectory() || !SLUG_RE.test(e.name) || isPrivate(e.name)) continue;
     const slug = e.name;
     if (desired.has(slug)) {
-      status.apps.push({ slug, state: DRIVER === 'none' ? 'pending'
+      status.apps.push({ slug, state: DRIVER === 'none' || desired.get(slug).runtime === 'worker' ? 'pending'
         : running.get(slug)?.state === 'running' ? 'running' : (running.get(slug)?.state ?? 'starting') });
     } else if (isPaused(slug)) {
       status.apps.push({ slug, state: 'paused' });
@@ -286,6 +297,7 @@ function converge() {
   let routesChanged = false;
 
   for (const [slug, app] of desired) {
+    if (app.runtime === 'worker') { noteWorker(slug); continue; }
     const cur = running.get(slug);
     if (!cur || cur.hash !== app.hash || cur.port !== String(app.port)) {
       startApp(slug, app);
@@ -295,8 +307,11 @@ function converge() {
     routesChanged = writeRoute(slug, app.port) || routesChanged;
   }
 
+  // A worker slug owns no container and no route fragment here: anything
+  // left from an earlier runtime goes the way of a removed manifest.
+  const runsHere = (slug) => desired.has(slug) && desired.get(slug).runtime !== 'worker';
   for (const [slug, cur] of running) {
-    if (!desired.has(slug)) {
+    if (!runsHere(slug)) {
       dockerQuiet(['rm', '-f', cur.name]);
       log(`removed ${cur.name} (manifest gone)`);
       if (fs.existsSync(routeFile(slug))) { fs.unlinkSync(routeFile(slug)); routesChanged = true; }
@@ -307,7 +322,7 @@ function converge() {
   for (const f of fs.readdirSync(ROUTES)) {
     if (!f.endsWith('.caddy') || f === '00-placeholder.caddy') continue;
     const slug = f.slice(0, -'.caddy'.length);
-    if (!desired.has(slug)) { fs.unlinkSync(path.join(ROUTES, f)); routesChanged = true; }
+    if (!runsHere(slug)) { fs.unlinkSync(path.join(ROUTES, f)); routesChanged = true; }
   }
 
   if (routesChanged) reloadGateway();

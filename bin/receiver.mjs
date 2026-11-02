@@ -43,7 +43,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RESERVED_TOP, validRelPath, hashFile, scryptHash, scryptVerify } from './sync-common.mjs';
+import { RESERVED_TOP, validRelPath, hashFile, scryptHash, scryptVerify, markWorkers } from './sync-common.mjs';
 
 if (process.argv[2] === '--hash') {
   const t = process.argv[3];
@@ -302,6 +302,9 @@ function handleFinish(body) {
       if (!kept.has(p)) { fs.rmSync(path.join(ROOT, p), { force: true }); deleted++; }
     }
     pruneEmptyDirs(ROOT);
+    // Worker slugs carry their routing marker; a manifest that stopped
+    // naming the worker runtime loses it in the same step.
+    markWorkers(ROOT);
     const added = [...s.received].filter((p) => !s.existed.has(p)).length;
     const summary = { ok: true, added, updated: s.received.size - added, deleted, bytes: s.bytes };
     log(`sync finish: +${added} ~${summary.updated} -${deleted} (${s.bytes} bytes)`);
@@ -340,6 +343,7 @@ for (const e of fs.readdirSync(ROOT)) {
 }
 try { if (Date.now() - fs.statSync(LOCK).mtimeMs > SESSION_TTL) fs.unlinkSync(LOCK); } catch {}
 seedDashboard();
+markWorkers(ROOT);
 
 const server = http.createServer(async (req, res) => {
   try {

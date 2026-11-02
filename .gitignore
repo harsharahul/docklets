@@ -9,3 +9,6 @@ PLAN.md
 .claude/
 .playwright-mcp/
 edge/frps.toml
+
+# git worktrees for parallel branches
+.worktrees/

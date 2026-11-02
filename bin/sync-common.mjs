@@ -17,6 +17,42 @@ const MAX_PATH = 1024;
 // has one, and fsck recreates it root-only when the volume is re-attached).
 export const RESERVED_TOP = new Set(['status', 'lost+found']);
 
+// A slug directory name: the gateway routes on it, the deployer and the
+// receiver agree on it.
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,40}$/;
+
+// The worker marker: a slug whose app.json names the worker runtime carries
+// an empty `.worker` file, which the gateway's file matcher routes to the
+// worker host. A dot-entry, so it is never served and never synced.
+export const WORKER_MARK = '.worker';
+
+/**
+ * Reconcile the worker markers under root: every slug whose app.json (a
+ * regular file, valid JSON, runtime "worker") gets the marker, every other
+ * slug loses a stale one. Symlinked slugs and manifests are ignored, like
+ * everywhere else in the sync. Returns the sorted worker slugs.
+ */
+export function markWorkers(root) {
+  const workers = [];
+  for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!e.isDirectory() || !SLUG_RE.test(e.name)) continue;
+    const dir = path.join(root, e.name);
+    const mark = path.join(dir, WORKER_MARK);
+    let isWorker = false;
+    try {
+      const manifest = path.join(dir, 'app.json');
+      if (fs.lstatSync(manifest).isFile()) isWorker = JSON.parse(fs.readFileSync(manifest, 'utf8'))?.runtime === 'worker';
+    } catch {}
+    if (isWorker) {
+      workers.push(e.name);
+      if (!fs.existsSync(mark)) fs.writeFileSync(mark, '');
+    } else {
+      try { fs.unlinkSync(mark); } catch {}
+    }
+  }
+  return workers.sort();
+}
+
 export function validRelPath(p) {
   if (typeof p !== 'string' || !p || p.length > MAX_PATH) return false;
   if (p.includes('\\') || /[\x00-\x1f\x7f]/.test(p)) return false;

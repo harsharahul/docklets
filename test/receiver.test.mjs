@@ -318,3 +318,34 @@ test('an unreadable primary hash file fails closed even with extras', async () =
     assert.equal(r.status, 503);
   } finally { proc.kill(); }
 });
+
+test('finish marks worker slugs with .worker and clears the mark when the manifest changes', async () => {
+  const worker = JSON.stringify({ runtime: 'worker', entry: 'worker.js' });
+  await fullSync([{ path: 'api/app.json', data: worker }, { path: 'api/worker.js', data: '// w' }]);
+  assert.ok(fs.existsSync(path.join(root, 'api', '.worker')), 'worker slug not marked after finish');
+  // The mark is a dot-entry: never listed, never readable, never deleted by a mirror.
+  const m = await (await api('GET', '/sync/manifest')).json();
+  assert.deepEqual(m.files.map((f) => f.path), ['api/app.json', 'api/worker.js']);
+  assert.equal((await api('GET', '/sync/file?path=api/.worker')).status, 400);
+  const again = await fullSync([{ path: 'api/app.json', data: worker }, { path: 'api/worker.js', data: '// w2' }]);
+  assert.equal(again.deleted, 0);
+  assert.ok(fs.existsSync(path.join(root, 'api', '.worker')));
+  // Back to a node manifest: the mark goes with the next finish.
+  await fullSync([{ path: 'api/app.json', data: JSON.stringify({ runtime: 'node', entry: 'worker.js', port: 3000 }) }, { path: 'api/worker.js', data: '// w' }]);
+  assert.equal(fs.existsSync(path.join(root, 'api', '.worker')), false, 'mark survived a manifest change');
+  await fullSync([{ path: 'other.txt', data: 'x' }]);
+  assert.equal(fs.existsSync(path.join(root, 'api')), false);
+});
+
+test('a receiver marks worker slugs already on disk when it starts', async () => {
+  const r2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-recv2-'));
+  fs.mkdirSync(path.join(r2, 'api'));
+  fs.writeFileSync(path.join(r2, 'api', 'app.json'), JSON.stringify({ runtime: 'worker', entry: 'w.js' }));
+  fs.mkdirSync(path.join(r2, 'stale'));
+  fs.writeFileSync(path.join(r2, 'stale', '.worker'), '');
+  const { proc } = await spawnReceiver({ DOCKLETS_ROOT: r2, DOCKLETS_SYNC_TOKEN_HASH_FILE: tmpFile(hashOf(TOKEN) + '\n') });
+  try {
+    assert.ok(fs.existsSync(path.join(r2, 'api', '.worker')), 'worker slug not marked at start');
+    assert.equal(fs.existsSync(path.join(r2, 'stale', '.worker')), false, 'stale mark kept at start');
+  } finally { proc.kill(); }
+});

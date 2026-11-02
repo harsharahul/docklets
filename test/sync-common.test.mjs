@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { validRelPath, walkManifest, hashFile, scryptHash, scryptVerify, scryptVerifyAsync }
+import { validRelPath, walkManifest, hashFile, scryptHash, scryptVerify, scryptVerifyAsync, markWorkers, WORKER_MARK }
   from '../bin/sync-common.mjs';
 
 test('validRelPath accepts normal paths and rejects escapes and reserved names', () => {
@@ -67,4 +67,43 @@ test('scryptVerifyAsync agrees with scryptVerify on both encodings and on garbag
   assert.equal(await scryptVerifyAsync('pw-b64', scryptHash('pw-b64')), true);
   assert.equal(await scryptVerifyAsync('pw-b64', 'garbage'), false);
   assert.equal(await scryptVerifyAsync('pw-b64', 'scrypt$99999999999$x$y'), false);
+});
+
+test('markWorkers marks worker slugs with a .worker file and clears stale marks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-mark-'));
+  const slug = (name, files) => {
+    fs.mkdirSync(path.join(root, name), { recursive: true });
+    for (const [f, c] of Object.entries(files)) fs.writeFileSync(path.join(root, name, f), c);
+  };
+  slug('api', { 'app.json': JSON.stringify({ runtime: 'worker', entry: 'worker.js' }), 'worker.js': '// w' });
+  slug('site', { 'index.html': '<h1>hi</h1>' });
+  slug('old', { 'app.json': JSON.stringify({ runtime: 'node', entry: 's.js', port: 3000 }), [WORKER_MARK]: '' });
+  slug('gone', { [WORKER_MARK]: '' });
+  slug('broken', { 'app.json': '{not json' });
+  slug('Linked', { 'app.json': JSON.stringify({ runtime: 'worker', entry: 'w.js' }) });
+  fs.symlinkSync(path.join(root, 'api'), path.join(root, 'alias'));
+  slug('symlinked', {});
+  fs.symlinkSync(path.join(root, 'api', 'app.json'), path.join(root, 'symlinked', 'app.json'));
+  fs.writeFileSync(path.join(root, 'README.md'), 'not a slug');
+
+  assert.deepEqual(markWorkers(root), ['api']);
+  assert.ok(fs.existsSync(path.join(root, 'api', WORKER_MARK)), 'worker slug not marked');
+  assert.equal(fs.existsSync(path.join(root, 'site', WORKER_MARK)), false, 'static slug marked');
+  assert.equal(fs.existsSync(path.join(root, 'old', WORKER_MARK)), false, 'stale mark on a node app kept');
+  assert.equal(fs.existsSync(path.join(root, 'gone', WORKER_MARK)), false, 'stale mark without a manifest kept');
+  assert.equal(fs.existsSync(path.join(root, 'broken', WORKER_MARK)), false, 'invalid manifest marked');
+  assert.equal(fs.existsSync(path.join(root, 'Linked', WORKER_MARK)), false, 'non-slug directory marked');
+  assert.equal(fs.existsSync(path.join(root, 'symlinked', WORKER_MARK)), false, 'symlinked manifest marked');
+  assert.equal(fs.lstatSync(path.join(root, 'alias')).isSymbolicLink(), true);
+  assert.equal(fs.readdirSync(path.join(root, 'alias')).includes(WORKER_MARK), true, 'the real dir behind the symlink is the one marked');
+
+  // Idempotent and stable: a second pass changes nothing and keeps the mark.
+  const before = fs.statSync(path.join(root, 'api', WORKER_MARK)).mtimeMs;
+  assert.deepEqual(markWorkers(root), ['api']);
+  assert.equal(fs.statSync(path.join(root, 'api', WORKER_MARK)).mtimeMs, before);
+
+  // The manifest changing away from worker removes the mark on the next pass.
+  fs.writeFileSync(path.join(root, 'api', 'app.json'), JSON.stringify({ runtime: 'node', entry: 'worker.js', port: 3000 }));
+  assert.deepEqual(markWorkers(root), []);
+  assert.equal(fs.existsSync(path.join(root, 'api', WORKER_MARK)), false);
 });
