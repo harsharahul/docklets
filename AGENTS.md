@@ -64,7 +64,10 @@ auto-redeploy):
 ```
 
 - **Runtimes**: `node` (node:20-alpine) or `python` (python:3.12-alpine).
-  Listen on `process.env.PORT` / `os.environ["PORT"]`.
+  Listen on `process.env.PORT` / `os.environ["PORT"]`. A third runtime,
+  `worker` (`{ "runtime": "worker", "entry": "worker.js" }`, an ES module
+  exporting `default { fetch(request, env) }`, no port), runs on hosted
+  docklets; locally it is marked and reported pending only.
 - Your server receives paths **with the `/<slug>/` prefix stripped** (a
   request to `/<slug>/api/x` arrives as `/api/x`). Use relative URLs in any
   frontend it serves.

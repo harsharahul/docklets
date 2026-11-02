@@ -49,6 +49,8 @@ test('driver=none writes a pending status feed and never touches docker', () => 
   assert.deepEqual(s.apps, [{ slug: 'my-app', state: 'pending' }, { slug: 'my-worker', state: 'pending' }]);
   assert.deepEqual(s.static, ['my-site']);
   assert.ok(!fs.existsSync(marker), 'docker was invoked under driver=none');
+  assert.ok(fs.existsSync(path.join(root, 'my-worker', '.worker')), 'worker slug not marked for the gateway');
+  assert.ok(!fs.existsSync(path.join(root, 'my-app', '.worker')));
 });
 
 test('a worker manifest needs an entry but no port', () => {
@@ -79,6 +81,7 @@ test('driver=docker never runs a worker slug as a container and writes it no rou
   const s = JSON.parse(fs.readFileSync(path.join(root, '.status.json'), 'utf8'));
   assert.deepEqual(s.apps.find((a) => a.slug === 'my-worker'), { slug: 'my-worker', state: 'pending' });
   assert.match(r.stdout, /my-worker: worker runtime .*hosted/);
+  assert.ok(fs.existsSync(path.join(root, 'my-worker', '.worker')), 'worker slug not marked for the gateway');
 });
 
 test('a fresh .sync-lock skips the converge pass entirely', () => {

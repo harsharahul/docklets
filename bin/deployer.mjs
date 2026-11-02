@@ -46,6 +46,7 @@ import http from 'node:http';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import { markWorkers } from './sync-common.mjs';
 
 const ROOT = path.resolve(process.env.DOCKLETS_ROOT || process.cwd());
 const NET = process.env.DOCKLETS_NETWORK || 'docklets-net';
@@ -287,6 +288,9 @@ function writeStatus(desired, running) {
 
 function converge() {
   if (syncLocked()) { log('sync in progress; skipping converge'); return; }
+  // The gateway routes worker slugs by their marker; keep it current here
+  // too, for folders no receiver writes.
+  markWorkers(ROOT);
   const desired = desiredApps();
   if (DRIVER === 'none') {
     // No app runner on this deployment: publish what exists and stop there.

@@ -8,9 +8,9 @@ converge pass.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `runtime` | string | yes | `"node"` (node:20-alpine) or `"python"` (python:3.12-alpine) |
+| `runtime` | string | yes | `"node"` (node:20-alpine), `"python"` (python:3.12-alpine), or `"worker"` (see [Workers](#workers)) |
 | `entry` | string | yes | Path of the program to run, relative to the slug directory. Must not be absolute or contain `..` |
-| `port` | integer | yes | Port the app listens on, 1-65535. Also passed to the app as `$PORT` |
+| `port` | integer | yes for `node` and `python` | Port the app listens on, 1-65535. Also passed to the app as `$PORT`. Not used by `worker` |
 | `env` | object | no | Extra environment variables. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. For non-secret values only |
 | `install` | boolean | no | `true` runs the runtime's dependency install at container start: `npm install --omit=dev` when `package.json` exists, `pip install -r requirements.txt` when `requirements.txt` exists. Default `false` |
 
@@ -45,7 +45,7 @@ Python app with dependencies and configuration:
 
 | Event | Effect |
 |---|---|
-| `app.json` appears | container created, route added, gateway reloaded |
+| `app.json` appears | container created, route added, gateway reloaded (`worker`: the slug is marked and routed to the worker host; no container) |
 | any file in the slug changes | container recreated with the new code |
 | `port` changes | container recreated, route rewritten |
 | app crashes | Docker restarts it (`unless-stopped`), independent of the deployer |
@@ -54,6 +54,63 @@ Python app with dependencies and configuration:
 
 `/data` contents are never touched by any lifecycle event; state placed there
 persists until the operator deletes `<root>/.data/<slug>/` manually.
+
+## Workers
+
+`"runtime": "worker"` runs the slug as a request handler in a shared,
+sandboxed JavaScript runtime instead of a container: no port, no process,
+nothing idling while nobody visits. Today the worker runtime runs on hosted
+docklets (docklets.dev); a self-hosted deployer recognizes the manifest,
+marks the slug, and reports it `pending` until a local worker runtime
+exists.
+
+```json
+{ "runtime": "worker", "entry": "worker.js", "env": { "GREETING": "hi" } }
+```
+
+`entry` is an ES module that exports a fetch handler:
+
+```js
+export default {
+  async fetch(request, env) {
+    return Response.json({ path: new URL(request.url).pathname, greeting: env.GREETING });
+  },
+};
+```
+
+- Requests arrive with the `/<slug>/` prefix stripped, like process apps;
+  the prefix rides in the `X-Docklets-Prefix` header. `/<slug>` without a
+  slash redirects to `/<slug>/`.
+- `env` carries the manifest's `env` values. `env.DB`, a per-docklet
+  database, arrives with the next release.
+- `install` and `port` are ignored. There is no `/data` and no writable
+  filesystem; keep state in `env.DB` once it exists.
+- Dependencies are bundled into the folder as ES modules (relative imports
+  only). There is no `npm` and no remote import at run time, and no
+  outbound network from the handler.
+- Data ships as modules, not files: the handler cannot read files from the
+  folder at run time, so import JSON and text as modules instead.
+- `access.json` works exactly as for a static slug: a private worker opens
+  with its link, password, or cookie, and the handler never sees the
+  credential.
+- Streaming responses and WebSocket upgrades are supported.
+
+Limits per docklet (hosted defaults):
+
+| Limit | Value |
+|---|---|
+| Memory | 64 MiB |
+| CPU per request | 50 ms (soft), 200 ms (hard) |
+| Wall clock per request | 30 s |
+| Request body | 1 MiB |
+| Folder as a bundle | 1 MiB, 50 files |
+
+A request that crosses a limit answers `546`; a handler that fails to load
+answers `547`, and the reason shows on the name's page at docklets.dev.
+
+The gateway routes a worker slug by an empty `.worker` marker file that the
+receiver and the deployer keep beside its `app.json` (a dot-entry: never
+served, never synced). Nothing in the folder needs to change for it.
 
 ## Contract inside the container
 

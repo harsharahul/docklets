@@ -42,7 +42,16 @@ jobs:
           chmod 755 "$TESTROOT"
           echo "TESTROOT=$TESTROOT" >> "$GITHUB_ENV"
           cp -R examples/guestbook examples/hello-static "$TESTROOT"/
-          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_PORT=8081 DOCKLETS_DETACH=1 \
+          # A stand-in worker host on the gateway network: it echoes what the
+          # gateway hands it, so the worker route can be checked end to end.
+          docker network create dk-ci >/dev/null 2>&1 || true
+          docker run -d --name dk-ci-wstub --network dk-ci node:20-alpine node -e '
+            require("node:http").createServer((req, res) => {
+              const pick = {}; for (const h of ["x-docklets-tenant","x-docklets-slug","x-docklets-prefix","authorization"]) pick[h] = req.headers[h] ?? null;
+              let n = 0; req.on("data", (c) => n += c.length);
+              req.on("end", () => { res.writeHead(200, {"content-type":"application/json","cache-control":"public, max-age=600"}); res.end(JSON.stringify({ url: req.url, headers: pick, bodyBytes: n })); });
+            }).listen(9200, "0.0.0.0");'
+          DOCKLETS_ROOT="$TESTROOT" DOCKLETS_PORT=8081 DOCKLETS_DETACH=1 DOCKLETS_WORKER_UPSTREAM=dk-ci-wstub:9200 \
             DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_ACCESS=dk-ci-access ./bin/serve.sh
           for i in $(seq 1 30); do
             curl -sf -o /dev/null http://127.0.0.1:8081/ && break; sleep 2
@@ -209,6 +218,40 @@ jobs:
           rm -rf "$TESTROOT/secret" "$TESTROOT/echo" "$J"
           DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- \
             node bin/deployer.mjs --once
+      - name: Verify worker slugs route to the worker host
+        run: |
+          B=http://127.0.0.1:8081
+          fail() { echo "::error::$1"; docker logs dk-ci-gw 2>&1 | tail -10; exit 1; }
+          code() { curl -s -o /dev/null -w '%{http_code}' --path-as-is "$@"; }
+          field() { node -pe 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); '"$1"; }
+          export DOCKLETS_ROOT="$TESTROOT"
+          mkdir -p "$TESTROOT/wk" "$TESTROOT/pw"
+          printf '{ "runtime": "worker", "entry": "worker.js" }\n' > "$TESTROOT/wk/app.json"
+          printf 'export default { fetch() { return new Response("x"); } };\n' > "$TESTROOT/wk/worker.js"
+          printf 'SOURCE PAGE\n' > "$TESTROOT/wk/index.html"
+          cp "$TESTROOT/wk/app.json" "$TESTROOT/wk/worker.js" "$TESTROOT/pw/"
+          WLINK=$(node bin/access.mjs link pw | grep -o '#dkl_[A-Za-z0-9_-]*' | cut -c2-)
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- node bin/deployer.mjs --once
+          test -f "$TESTROOT/wk/.worker" || fail "the deployer did not mark the worker slug"
+          # the slug reaches the worker host with its prefix stripped and named in headers; its files are never served
+          [ "$(curl -s "$B/wk/api/x?q=1" | field 'j.url+" "+j.headers["x-docklets-slug"]+" "+j.headers["x-docklets-prefix"]')" = "/api/x?q=1 wk /wk" ] || fail "worker route did not reach the stand-in with the prefix stripped"
+          if curl -s "$B/wk/" | grep -q 'SOURCE PAGE'; then fail "a worker slug served its files"; fi
+          [ "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$B/wk")" = "308 $B/wk/" ] || fail "bare worker slug did not redirect"
+          [ "$(code -H 'Accept: text/html' "$B/WK/x")" = 404 ] || fail "case variant of a worker slug not refused"
+          [ "$(code "$B/hello-static/.worker")" = 404 ] || fail "the marker name is served"
+          [ "$(curl -s -X POST --data-binary 'hello' "$B/wk/post" | field 'j.bodyBytes')" = 5 ] || fail "request body did not reach the worker host"
+          # the access check runs in front of worker slugs exactly as for files
+          [ "$(code -H 'Accept: text/html' "$B/pw/x")" = 303 ] || fail "private worker slug not sent to login"
+          [ "$(code -H 'Accept: application/json' "$B/pw/x")" = 401 ] || fail "private worker slug API request not 401"
+          [ "$(curl -s -D "$RUNNER_TEMP/wh" -H "Authorization: Bearer $WLINK" "$B/pw/x" | field 'j.url+" "+j.headers.authorization')" = "/x null" ] || fail "link bearer did not open the private worker, or reached it"
+          grep -qi '^cache-control: private' "$RUNNER_TEMP/wh" || fail "private worker response is shared-cacheable"
+          # without a worker host the slug answers the not-answering page, never its files
+          docker stop dk-ci-wstub >/dev/null
+          [ "$(code "$B/wk/x")" = 502 ] || fail "worker slug without a host is not 502"
+          curl -s "$B/wk/x" | grep -q 'not answering' || fail "502 page is not the readable one"
+          docker start dk-ci-wstub >/dev/null
+          rm -rf "$TESTROOT/wk" "$TESTROOT/pw"
+          DOCKLETS_NETWORK=dk-ci DOCKLETS_GATEWAY=dk-ci-gw DOCKLETS_PREFIX=dk-ci- node bin/deployer.mjs --once
       - name: Verify status feed and dashboard
         run: |
           test -f "$TESTROOT/.status.json"
@@ -397,7 +440,7 @@ jobs:
       - name: Teardown
         if: always()
         run: |
-          docker rm -f dk-ci-gw dk-ci-access 2>/dev/null || true
+          docker rm -f dk-ci-gw dk-ci-access dk-ci-wstub 2>/dev/null || true
           docker ps -aq --filter label=docklet | xargs -r docker rm -f
           docker network rm dk-ci dk-ci-access 2>/dev/null || true
 
@@ -507,6 +550,22 @@ jobs:
             node bin/sync.mjs "$L"
           [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: hosted-ci.docklets.test' http://127.0.0.1:8090/note.txt)" = "404" ] \
             || { echo "::error::deleted file still served"; exit 1; }
+          # a synced worker slug is marked by the receiver and routed by the
+          # gateway (no worker host here: the readable 502), never served as files
+          mkdir "$L/wk"
+          printf '{"runtime":"worker","entry":"worker.js"}' > "$L/wk/app.json"
+          printf '// w\n' > "$L/wk/worker.js"
+          printf 'SOURCE PAGE\n' > "$L/wk/index.html"
+          DOCKLETS_SYNC_URL=http://127.0.0.1:19000 DOCKLETS_SYNC_TOKEN="$TOKEN" node bin/sync.mjs "$L"
+          test -f "$HR/wk/.worker" || { echo "::error::receiver did not mark the worker slug"; docker logs dk-ci-rt 2>&1 | tail -10; exit 1; }
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: hosted-ci.docklets.test' http://127.0.0.1:8090/wk/)" = "502" ] \
+            || { echo "::error::worker slug without a host is not 502"; exit 1; }
+          if curl -s -H 'Host: hosted-ci.docklets.test' http://127.0.0.1:8090/wk/ | grep -q 'SOURCE PAGE'; then echo "::error::worker slug served its files"; exit 1; fi
+          for i in $(seq 1 15); do
+            curl -s -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/.status.json | grep -q '"wk"' && break; sleep 2
+          done
+          curl -s -H "Host: hosted-ci.docklets.test" http://127.0.0.1:8090/.status.json | grep -q '"wk"' \
+            || { echo "::error::worker slug missing from the status feed"; exit 1; }
       - name: Teardown
         if: always()
         run: |

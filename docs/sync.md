@@ -25,6 +25,12 @@ direction:
 A `404.html` at the folder root syncs like any other file, so a custom
 not-found page works on the far side.
 
+After every applied sync the receiver reconciles worker markers: a slug
+whose `app.json` names `"runtime": "worker"` gets an empty `.worker` file
+beside it, and a slug whose manifest changed or went away loses a stale
+one. The marker is what the gateway routes on ([manifest.md](manifest.md),
+Workers); as a dot-entry it is never listed, read, or deleted by a sync.
+
 A slug's `access.json` (which makes it private, see [access.md](access.md))
 syncs like any other file, with one exception: leaving it out never makes a
 docklet public. If it exists only on the receiver and the slug still has

@@ -237,6 +237,12 @@ Rules your app lives by:
 - Crash → auto-restart. File change → auto-redeploy. `app.json` deleted →
   back to static. Folder deleted → route and container removed.
 
+A third runtime, `"worker"`, is an ES module exporting a fetch handler
+(`export default { fetch(request, env) }`) with no port and no container:
+hosted docklets run it in a shared sandboxed runtime, and a self-hosted
+deployer marks it and reports it pending until a local worker runtime
+exists. See [examples/hello-worker](examples/hello-worker).
+
 Full specification: [docs/manifest.md](docs/manifest.md).
 
 A request for a path nothing serves gets a plain not-found page. Put your
