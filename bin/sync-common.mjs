@@ -29,8 +29,11 @@ export const WORKER_MARK = '.worker';
 /**
  * Reconcile the worker markers under root: every slug whose app.json (a
  * regular file, valid JSON, runtime "worker") gets the marker, every other
- * slug loses a stale one. Symlinked slugs and manifests are ignored, like
- * everywhere else in the sync. Returns the sorted worker slugs.
+ * slug loses a stale one. A marked slug whose manifest is present but
+ * unreadable keeps its marker: a half-written manifest must not turn a
+ * worker's source into served files. Symlinked slugs and manifests are
+ * ignored, like everywhere else in the sync. Returns the sorted worker
+ * slugs.
  */
 export function markWorkers(root) {
   const workers = [];
@@ -41,7 +44,10 @@ export function markWorkers(root) {
     let isWorker = false;
     try {
       const manifest = path.join(dir, 'app.json');
-      if (fs.lstatSync(manifest).isFile()) isWorker = JSON.parse(fs.readFileSync(manifest, 'utf8'))?.runtime === 'worker';
+      if (fs.lstatSync(manifest).isFile()) {
+        try { isWorker = JSON.parse(fs.readFileSync(manifest, 'utf8'))?.runtime === 'worker'; }
+        catch { isWorker = fs.existsSync(mark); }
+      }
     } catch {}
     if (isWorker) {
       workers.push(e.name);

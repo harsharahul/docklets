@@ -80,18 +80,20 @@ test('markWorkers marks worker slugs with a .worker file and clears stale marks'
   slug('old', { 'app.json': JSON.stringify({ runtime: 'node', entry: 's.js', port: 3000 }), [WORKER_MARK]: '' });
   slug('gone', { [WORKER_MARK]: '' });
   slug('broken', { 'app.json': '{not json' });
+  slug('broken-kept', { 'app.json': '{not json', [WORKER_MARK]: '' });
   slug('Linked', { 'app.json': JSON.stringify({ runtime: 'worker', entry: 'w.js' }) });
   fs.symlinkSync(path.join(root, 'api'), path.join(root, 'alias'));
   slug('symlinked', {});
   fs.symlinkSync(path.join(root, 'api', 'app.json'), path.join(root, 'symlinked', 'app.json'));
   fs.writeFileSync(path.join(root, 'README.md'), 'not a slug');
 
-  assert.deepEqual(markWorkers(root), ['api']);
+  assert.deepEqual(markWorkers(root), ['api', 'broken-kept']);
   assert.ok(fs.existsSync(path.join(root, 'api', WORKER_MARK)), 'worker slug not marked');
   assert.equal(fs.existsSync(path.join(root, 'site', WORKER_MARK)), false, 'static slug marked');
   assert.equal(fs.existsSync(path.join(root, 'old', WORKER_MARK)), false, 'stale mark on a node app kept');
   assert.equal(fs.existsSync(path.join(root, 'gone', WORKER_MARK)), false, 'stale mark without a manifest kept');
   assert.equal(fs.existsSync(path.join(root, 'broken', WORKER_MARK)), false, 'invalid manifest marked');
+  assert.ok(fs.existsSync(path.join(root, 'broken-kept', WORKER_MARK)), 'a marked slug lost its mark while its manifest was unreadable');
   assert.equal(fs.existsSync(path.join(root, 'Linked', WORKER_MARK)), false, 'non-slug directory marked');
   assert.equal(fs.existsSync(path.join(root, 'symlinked', WORKER_MARK)), false, 'symlinked manifest marked');
   assert.equal(fs.lstatSync(path.join(root, 'alias')).isSymbolicLink(), true);
@@ -99,11 +101,15 @@ test('markWorkers marks worker slugs with a .worker file and clears stale marks'
 
   // Idempotent and stable: a second pass changes nothing and keeps the mark.
   const before = fs.statSync(path.join(root, 'api', WORKER_MARK)).mtimeMs;
-  assert.deepEqual(markWorkers(root), ['api']);
+  assert.deepEqual(markWorkers(root), ['api', 'broken-kept']);
   assert.equal(fs.statSync(path.join(root, 'api', WORKER_MARK)).mtimeMs, before);
 
   // The manifest changing away from worker removes the mark on the next pass.
   fs.writeFileSync(path.join(root, 'api', 'app.json'), JSON.stringify({ runtime: 'node', entry: 'worker.js', port: 3000 }));
-  assert.deepEqual(markWorkers(root), []);
+  assert.deepEqual(markWorkers(root), ['broken-kept']);
   assert.equal(fs.existsSync(path.join(root, 'api', WORKER_MARK)), false);
+  // A manifest that goes away takes the kept mark with it.
+  fs.unlinkSync(path.join(root, 'broken-kept', 'app.json'));
+  assert.deepEqual(markWorkers(root), []);
+  assert.equal(fs.existsSync(path.join(root, 'broken-kept', WORKER_MARK)), false);
 });
