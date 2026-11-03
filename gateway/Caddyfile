@@ -14,7 +14,9 @@
 }
 
 http://:8080 {
-	root * /srv
+	# One folder per gateway by default; a gateway serving many folders
+	# (one per host) sets DOCKLETS_CADDY_ROOT to a placeholder path.
+	root * {$DOCKLETS_CADDY_ROOT:/srv}
 	encode gzip
 
 	# The bare root redirects to the status dashboard instead of listing every
@@ -67,13 +69,40 @@ http://:8080 {
 			request_header @linkbearer -Authorization
 		}
 
+		# A worker slug (docs/manifest.md, runtime "worker") carries an empty
+		# .worker marker beside its app.json, kept by the receiver and the
+		# deployer. The marker routes the slug to the worker host with the
+		# prefix stripped and the tenant, slug and prefix as headers; the
+		# access check above has already run. The name is captured by an
+		# outer matcher and the marker checked in a nested one: matchers in
+		# one set run in no fixed order, so a placeholder set by one of them
+		# is not reliably visible to another in the same set.
+		@slugpath path_regexp ws (?i)^/([a-z0-9][a-z0-9-]{0,40})(/|$)
+		route @slugpath {
+			@marked file /{re.ws.1}/.worker
+			route @marked {
+				# A case variant of a marked slug never reaches the worker or
+				# the files (a case-insensitive mount matches the marker twice).
+				@badcase not path_regexp ^/[a-z0-9][a-z0-9-]{0,40}(/|$)
+				error @badcase 404
+				@bare path_regexp ^/[^/]+$
+				redir @bare {http.request.uri.path}/ 308
+				uri strip_prefix /{re.ws.1}
+				reverse_proxy {$DOCKLETS_WORKER_UPSTREAM:127.0.0.1:9200} {
+					header_up X-Docklets-Tenant {http.request.host.labels.2}
+					header_up X-Docklets-Slug {re.ws.1}
+					header_up X-Docklets-Prefix /{re.ws.1}
+				}
+			}
+		}
+
 		# Dynamic app routes maintained by the deployer. reverse_proxy terminates
 		# matched requests, so proxied slugs never fall through to file_server.
 		import /etc/caddy/routes/*.caddy
 
 		# No `browse`: a directory without index.html 404s instead of listing files.
 		file_server {
-			hide .gateway .data .git AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json access.json .access.json.*
+			hide .gateway .data .git .worker AGENTS.md CLAUDE.md admin-ui.html .staging-* Caddyfile *.plist *.sh *.mjs *.log .DS_Store app.json access.json .access.json.*
 		}
 	}
 
@@ -116,6 +145,27 @@ http://:8080 {
 					</main>
 					HTML 404
 			}
+		}
+		# An upstream that does not answer (an app container, the worker
+		# host, or the access service) reads as a plain sentence, not a bare
+		# status line.
+		@unreachable expression {err.status_code} == 502 || {err.status_code} == 503
+		handle @unreachable {
+			header Content-Type "text/html; charset=utf-8"
+			respond <<HTML
+				<!doctype html>
+				<html lang="en">
+				<meta charset="utf-8">
+				<meta name="viewport" content="width=device-width, initial-scale=1">
+				<meta name="color-scheme" content="light dark">
+				<title>Not answering</title>
+				<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:Canvas;color:CanvasText;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+				<main style="text-align:center;padding:2rem 1.5rem;max-width:30rem">
+				<h1 style="font-size:1.3rem;margin:0 0 .6rem">This docklet is not answering</h1>
+				<p style="margin:.3rem 0;line-height:1.55;opacity:.72">The program behind <code>{http.request.uri.path}</code> is not reachable right now. Try again in a moment.</p>
+				<p style="margin:1.6rem 0 0;font-size:.82rem;opacity:.5">served by docklets</p>
+				</main>
+				HTML {err.status_code}
 		}
 		handle {
 			respond "{err.status_code} {err.status_text}" {err.status_code}

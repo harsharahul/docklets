@@ -6,6 +6,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A third manifest runtime, `"worker"`: the slug is an ES module exporting
+  a fetch handler, served by a worker host behind the gateway instead of a
+  container (no port, nothing idling). The receiver and the deployer keep an
+  empty `.worker` marker beside such a manifest, and the gateway routes a
+  marked slug to `DOCKLETS_WORKER_UPSTREAM` with the `/<slug>/` prefix
+  stripped and the tenant, slug and prefix as headers; the access check
+  runs in front of it as for every slug. Without a worker host attached the
+  slug answers a readable 502 page. Self-hosted deployers report worker
+  slugs `pending` until a local worker runtime exists. `docs/manifest.md`
+  has the contract and limits; `examples/hello-worker` is a first handler.
+- The gateway's document root can be set with `DOCKLETS_CADDY_ROOT`.
+
 ## [0.5.1] - 2026-10-28
 
 ### Fixed

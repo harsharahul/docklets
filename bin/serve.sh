@@ -16,6 +16,9 @@
 #                      that only the gateway joins.
 #   DOCKLETS_DETACH    "1" runs the container detached and exits (for CI and
 #                      environments that reap a step's attached processes)
+#   DOCKLETS_WORKER_UPSTREAM  host:port of a worker host for slugs marked
+#                      runtime "worker" (default: nothing attached; such a
+#                      slug answers the not-answering page)
 set -euo pipefail
 
 ROOT="$(cd "${DOCKLETS_ROOT:-$PWD}" && pwd)"
@@ -70,6 +73,7 @@ GW_ARGS=(
   -v "$CADDYFILE":/etc/caddy/Caddyfile:ro
   -v "$ROOT/.gateway/routes":/etc/caddy/routes:ro
   -e DOCKLETS_ACCESS_UPSTREAM="$ACCESS:9100"
+  -e DOCKLETS_WORKER_UPSTREAM="${DOCKLETS_WORKER_UPSTREAM:-127.0.0.1:9200}"
   --read-only
   --tmpfs /tmp
   --tmpfs /data

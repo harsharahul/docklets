@@ -36,6 +36,8 @@ kubernetes, systemd) restart it.
 | `DOCKLETS_RECEIVER_ADDR` | `0.0.0.0` | receiver listen address inside the container |
 | `DOCKLETS_CONNECTOR_CONFIG` | `/etc/docklets/connector.env` | connector config (see docs/tunnel.md) |
 | `DOCKLETS_ACCESS_SECURE` | `auto` | `1` marks access cookies `Secure` regardless of the host (set it when the folder is only ever served over https) |
+| `DOCKLETS_WORKER_UPSTREAM` | `127.0.0.1:9200` | host:port of a worker host for slugs with `"runtime": "worker"` (read by the gateway's Caddyfile); with nothing listening, such a slug answers the readable 502 page |
+| `DOCKLETS_CADDY_ROOT` | `/srv` | the gateway's document root; a gateway serving one folder per host sets a placeholder path |
 
 ## Compose example
 
