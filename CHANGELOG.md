@@ -19,6 +19,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   slugs `pending` until a local worker runtime exists. `docs/manifest.md`
   has the contract and limits; `examples/hello-worker` is a first handler.
 - The gateway's document root can be set with `DOCKLETS_CADDY_ROOT`.
+- `env.DB` for worker docklets on hosted names: the docklet's own SQLite
+  database (`query`, `exec`, and a `kv` helper), documented in
+  `docs/manifest.md` with its limits; `examples/guestbook-worker` keeps a
+  guestbook in it.
 - Cells: one container serving one folder per tenant. The receiver's cell
   mode (`DOCKLETS_SYNC_HASH_DIR`) keeps a folder, a hash file, a session,
   a dashboard and a status feed per tenant, chosen by `X-Docklets-Tenant`

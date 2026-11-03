@@ -81,10 +81,10 @@ export default {
 - Requests arrive with the `/<slug>/` prefix stripped, like process apps;
   the prefix rides in the `X-Docklets-Prefix` header. `/<slug>` without a
   slash redirects to `/<slug>/`.
-- `env` carries the manifest's `env` values. `env.DB`, a per-docklet
-  database, arrives with the next release.
+- `env` carries the manifest's `env` values, and `env.DB`, the docklet's
+  own database (below).
 - `install` and `port` are ignored. There is no `/data` and no writable
-  filesystem; keep state in `env.DB` once it exists.
+  filesystem; keep state in `env.DB`.
 - Dependencies are bundled into the folder as ES modules (relative imports
   only). There is no `npm` and no remote import at run time, and no
   outbound network from the handler.
@@ -104,6 +104,39 @@ Limits per docklet (hosted defaults):
 | Wall clock per request | 30 s |
 | Request body | 1 MiB |
 | Folder as a bundle | 1 MiB, 50 files |
+
+### env.DB: the docklet's database
+
+Every worker docklet on a hosted name can keep data in its own SQLite
+database, shared by the name's worker docklets and by nothing else. It is
+created on first use and removed with the name.
+
+```js
+await env.DB.exec('CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT NOT NULL)');
+const { lastId } = await env.DB.exec('INSERT INTO notes (text) VALUES (?)', ['hello']);
+const rows = await env.DB.query('SELECT id, text FROM notes ORDER BY id');   // [{ id: 1, text: 'hello' }]
+
+await env.DB.kv.put('greeting', 'hi');          // strings under keys
+await env.DB.kv.get('greeting');                // 'hi' (null when absent)
+await env.DB.kv.list('user:');                  // [{ key, value }], by prefix
+await env.DB.kv.del('greeting');                // true when it existed
+```
+
+- `query(sql, params)` returns rows as objects; `exec(sql, params)` returns
+  `{ changes, lastId }`. Parameters are `?` placeholders: numbers, strings,
+  booleans, `null`, and `Uint8Array` for blobs.
+- A statement that fails throws with SQLite's message. `ATTACH`,
+  `VACUUM INTO`, extensions, and schema-editing pragmas are refused.
+- Each call is its own statement; transactions across calls are not
+  available yet.
+
+| Limit | Value |
+|---|---|
+| Database size | 20 MB |
+| One call | 5 s (a longer query is stopped) |
+| Calls at once, per name | 4 |
+
+`examples/guestbook-worker` keeps a guestbook in `env.DB`.
 
 A request that crosses a limit answers `546`; a handler that fails to load
 answers `547`, and the reason shows on the name's page at docklets.dev.
