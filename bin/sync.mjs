@@ -15,6 +15,8 @@
  * Usage: node sync.mjs [--dry-run] [--yes] [--public <slug>]... <folder>
  * Env:   DOCKLETS_SYNC_URL          base URL of the sync endpoint
  *        DOCKLETS_SYNC_TOKEN        the sync token (or ..._FILE with a path)
+ *        DOCKLETS_SYNC_TENANT       the folder to sync into when the receiver
+ *                                   is a cell (one folder per tenant)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,6 +50,7 @@ if (!token && process.env.DOCKLETS_SYNC_TOKEN_FILE) {
   catch { die('cannot read DOCKLETS_SYNC_TOKEN_FILE'); }
 }
 if (!token) die('DOCKLETS_SYNC_TOKEN is not set');
+const TENANT = process.env.DOCKLETS_SYNC_TENANT || '';
 
 async function api(method, p, body, raw) {
   let res;
@@ -55,6 +58,7 @@ async function api(method, p, body, raw) {
     res = await fetch(URL_BASE + p, {
       method,
       headers: { authorization: `Bearer ${token}`,
+        ...(TENANT ? { 'x-docklets-tenant': TENANT } : {}),
         ...(body ? { 'content-type': 'application/json' } : {}) },
       body: raw ?? (body ? JSON.stringify(body) : undefined),
     });

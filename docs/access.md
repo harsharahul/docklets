@@ -154,6 +154,7 @@ Pass `--public <slug>` to remove it. Removing the whole slug removes its
 | `DOCKLETS_ACCESS_UPSTREAM` | `127.0.0.1:9100` | where the gateway finds the access service |
 | `DOCKLETS_ACCESS` | `docklets-access` | the access container's name (`serve.sh`) |
 | `DOCKLETS_ACCESS_NETWORK` | `<network>-access` | the internal network it shares with the gateway (`serve.sh`) |
+| `DOCKLETS_ACCESS_MULTI_ROOT` | unset | `1`: one folder per tenant under the root (a cell). The gateway names the tenant from the host in `X-Docklets-Tenant`; each tenant keeps its own policies, cookie key (`<root>/<tenant>/.gateway/access-key`), and failure limits, and a request without a valid tenant is refused |
 
 `bin/serve.sh` passes the `DOCKLETS_ACCESS_SECURE`, `_CLIENT_HEADER`,
 `_MAX_FAILS`, and `_MAX_VERIFIES` values from its own environment to the

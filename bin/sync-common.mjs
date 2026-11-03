@@ -135,3 +135,25 @@ export function scryptVerifyAsync(token, stored) {
     } catch { resolve(false); }
   });
 }
+
+/**
+ * The public status feed for a folder with no app runner (hosted cells,
+ * driver "none"): what the gateway's dashboard shows. Only what a visitor
+ * could already see: slug names and a coarse state, never a private slug.
+ * Written atomically to <root>/.status.json.
+ */
+export function writeStatusFeed(root) {
+  const status = { generatedAt: new Date().toISOString(), apps: [], static: [] };
+  for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!e.isDirectory() || !SLUG_RE.test(e.name) || RESERVED_TOP.has(e.name)) continue;
+    const dir = path.join(root, e.name);
+    if (fs.existsSync(path.join(dir, 'access.json'))) continue;
+    if (fs.existsSync(path.join(dir, 'app.json'))) status.apps.push({ slug: e.name, state: 'pending' });
+    else if (fs.existsSync(path.join(dir, 'app.json.paused'))) status.apps.push({ slug: e.name, state: 'paused' });
+    else status.static.push(e.name);
+  }
+  const tmp = path.join(root, '.status.json.tmp');
+  fs.writeFileSync(tmp, JSON.stringify(status, null, 2) + '\n');
+  fs.renameSync(tmp, path.join(root, '.status.json'));
+  return status;
+}

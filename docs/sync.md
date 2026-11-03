@@ -51,6 +51,7 @@ node bin/sync.mjs ~/my-folder
 | `DOCKLETS_SYNC_URL` | base URL of the receiver (endpoints are appended) |
 | `DOCKLETS_SYNC_TOKEN` | the sync token |
 | `DOCKLETS_SYNC_TOKEN_FILE` | read the token from a file instead |
+| `DOCKLETS_SYNC_TENANT` | the folder to sync into when the receiver is a cell (below) |
 | `--dry-run` | report what would upload and what would be deleted, change nothing |
 | `--yes` | required to sync an empty folder (which deletes everything remote) |
 | `--public <slug>` | make a slug public: remove its `access.json` on the receiver even though the local folder has none (repeatable) |
@@ -137,3 +138,34 @@ Errors are explicit: 401 wrong token, 400 invalid manifest entry or path,
 size cap, 422 content mismatch. Only one session exists at a time, and a
 second `/sync/start` that overlaps the first answers 409 even while the
 first is still hashing.
+
+## Cells: one receiver, one folder per tenant
+
+A receiver started with `DOCKLETS_SYNC_HASH_DIR` instead of
+`DOCKLETS_SYNC_TOKEN_HASH_FILE` serves a cell: every tenant has a folder
+`<root>/<tenant>/` and a hash file `<hash dir>/<tenant>` (one hash per
+line, as above). Every request names its tenant in the `X-Docklets-Tenant`
+header (the sync client sends `DOCKLETS_SYNC_TENANT`), and the bearer token
+must verify against that tenant's hash file: the header only chooses which
+hashes are checked, so it opens nothing by itself. A tenant without a hash
+file answers 401; a missing or malformed tenant answers 400.
+
+Everything above holds per tenant: one session at a time per folder, a
+lock and a staging area per folder, the dashboard seeded into each folder,
+worker markers kept per folder. A cell has no deployer, so the receiver
+writes each folder's `.status.json` after every applied sync. `/healthz`
+lists `cell` in `features`.
+
+Two endpoints exist only in a cell:
+
+- `POST /sync/purge` (the tenant's own token) removes the tenant's folder
+  whole. The credential stays valid; the next request starts an empty
+  folder.
+- `GET /sync/roots` lists the tenant folders on disk, for a control plane
+  reconciling them against its records. It takes the cell credential from
+  `DOCKLETS_CELL_ADMIN_HASH_FILE`, never a tenant token.
+
+| Env | Meaning |
+|---|---|
+| `DOCKLETS_SYNC_HASH_DIR` | directory of per-tenant hash files; turns on cell mode |
+| `DOCKLETS_CELL_ADMIN_HASH_FILE` | hash file for the cell credential (`/sync/roots`); unset = no listing |

@@ -19,6 +19,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   slugs `pending` until a local worker runtime exists. `docs/manifest.md`
   has the contract and limits; `examples/hello-worker` is a first handler.
 - The gateway's document root can be set with `DOCKLETS_CADDY_ROOT`.
+- Cells: one container serving one folder per tenant. The receiver's cell
+  mode (`DOCKLETS_SYNC_HASH_DIR`) keeps a folder, a hash file, a session,
+  a dashboard and a status feed per tenant, chosen by `X-Docklets-Tenant`
+  and proven by that tenant's own token; `POST /sync/purge` removes a
+  tenant's folder and `GET /sync/roots` lists them for a control plane.
+  The access service's per-tenant mode (`DOCKLETS_ACCESS_MULTI_ROOT`) keeps
+  policies, cookie keys and failure limits per tenant. The gateway names
+  the tenant from the host and checks `DOCKLETS_HOST_GUARD` before it
+  answers anything. `DOCKLETS_CELL=1` runs the container as a cell, and
+  the sync client addresses one tenant with `DOCKLETS_SYNC_TENANT`.
 
 ## [0.5.1] - 2026-10-28
 
