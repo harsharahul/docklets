@@ -6,6 +6,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `env.NOTIFY` for worker docklets on hosted names: `send(topic, data)`
+  posts a signed webhook to each URL the owner registered for the app, so
+  an agent hears that something changed without polling. Deliveries carry
+  `X-Docklets-Event`, `X-Docklets-Timestamp` and an HMAC-SHA256
+  `X-Docklets-Signature`, and are retried for about a day.
+  `docs/manifest.md` has the API, the limits and how to verify a delivery;
+  `examples/guestbook-worker` sends a notice for each new entry.
+
 ## [0.7.0] - 2026-11-06
 
 ### Added
