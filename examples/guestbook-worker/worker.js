@@ -48,6 +48,8 @@ export default {
           return Response.json({ error: 'text is required, up to 200 characters' }, { status: 400 });
         }
         const { lastId } = await env.DB.exec('INSERT INTO messages (text, at) VALUES (?, ?)', [text.trim(), new Date().toISOString()]);
+        // Tell the owner's webhooks; a notice that cannot go out never fails the post.
+        if (env.NOTIFY) await env.NOTIFY.send('messages', { id: lastId }).catch(() => {});
         return Response.json({ id: lastId }, { status: 201 });
       }
       return Response.json(await env.DB.query('SELECT id, text, at FROM messages ORDER BY id DESC LIMIT 50'));

@@ -167,6 +167,69 @@ covers who can call and what the app sees. `examples/hello-worker` opts in
 with `true`, and `examples/guestbook-worker` allows `GET` and `POST` under
 `api/`.
 
+### env.NOTIFY: telling an agent something changed
+
+On a hosted name, a worker can tell the owner's webhooks that something
+changed, so an agent hears about it without polling:
+
+```js
+await env.NOTIFY.send('events', { after: 41 });   // { id: 'dkn_...', hooks: 1 }
+```
+
+- The owner adds webhook URLs for an app on the name's page at docklets.dev:
+  up to three per app, `https` only. Each gets a signing secret, shown once.
+  With none, `send` delivers nothing and returns `{ id: null, hooks: 0 }`.
+- `topic` is 1 to 64 lowercase letters, digits, dots, dashes or
+  underscores. `data` is optional JSON of at most 4 KB. Keep it small: a
+  notice says what changed, and the agent reads the details from the app,
+  for example with a connector call.
+- `send` throws when the topic or the data cannot be sent, and past 60
+  notices a minute per app.
+
+| Limit | Value |
+|---|---|
+| Notices per app | 60 a minute |
+| Data per notice | 4 KB of JSON |
+| Webhooks per app | 3 |
+| Deliveries waiting per webhook | 1000 |
+
+#### Receiving a webhook
+
+Each notice arrives as a `POST` with a JSON body:
+
+```json
+{ "id": "dkn_0123456789abcdef", "name": "alice-blog", "slug": "inbox",
+  "topic": "events", "data": { "after": 41 }, "at": "2026-11-06T20:00:04.000Z" }
+```
+
+| Header | Value |
+|---|---|
+| `X-Docklets-Event` | the notice id, the same on every retry |
+| `X-Docklets-Timestamp` | when this attempt was sent, in seconds since the epoch |
+| `X-Docklets-Signature` | `v1=` and the hex HMAC-SHA256 of `<timestamp>.<body>`, keyed with the webhook's secret |
+
+A receiver checks the signature over the exact body it received, refuses a
+timestamp more than five minutes old, skips an `id` it has already handled,
+and answers 2xx within 10 seconds. Any other answer, a redirect included,
+is a failure: the notice is tried again after 30 seconds, 2 minutes, 10
+minutes, 1 hour, 6 hours and 24 hours, then dropped. The name's page lists
+recent deliveries with their last answers.
+
+```js
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+// rawBody: the request body exactly as received, before any JSON parsing.
+export function verifyDocklets(secret, headers, rawBody) {
+  const ts = headers['x-docklets-timestamp'];
+  if (!ts || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  const want = Buffer.from(`v1=${createHmac('sha256', secret).update(`${ts}.${rawBody}`).digest('hex')}`);
+  const got = Buffer.from(String(headers['x-docklets-signature'] ?? ''));
+  return want.length === got.length && timingSafeEqual(want, got);
+}
+```
+
+`examples/guestbook-worker` sends a `messages` notice for each new entry.
+
 A request that crosses a limit answers `546`; a handler that fails to load
 answers `547`, and the reason shows on the name's page at docklets.dev.
 
