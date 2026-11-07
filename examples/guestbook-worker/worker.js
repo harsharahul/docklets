@@ -39,6 +39,7 @@ export default {
     if (url.pathname === '/' && request.method === 'GET') {
       return new Response(PAGE, { headers: { 'content-type': 'text/html; charset=utf-8' } });
     }
+    if (url.pathname === '/api/health') return Response.json({ ok: true });
     if (url.pathname === '/api/messages') {
       await env.DB.exec('CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, text TEXT NOT NULL, at TEXT NOT NULL)');
       if (request.method === 'POST') {

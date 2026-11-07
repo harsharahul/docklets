@@ -39,6 +39,14 @@ http://:8080 {
 		@foreignhost not header_regexp Host {$DOCKLETS_HOST_GUARD:.*}
 		error @foreignhost 404
 
+		# Connector call headers are set only inside a hosted platform, on the
+		# path that skips this gateway. Arriving here, they are a client's own
+		# words, so no app ever sees them (docs/access.md).
+		request_header -X-Docklets-Caller
+		request_header -X-Docklets-Client
+		request_header -X-Docklets-Request-Id
+		request_header -X-Docklets-Connector-Key
+
 		# Ambiguous paths (dot segments, double slashes, and their encoded
 		# forms) are refused outright. {http.request.uri.path} is decoded but
 		# not cleaned, so this sees what the cleaned matchers below never do.

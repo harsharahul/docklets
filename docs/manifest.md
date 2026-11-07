@@ -13,6 +13,7 @@ converge pass.
 | `port` | integer | yes for `node` and `python` | Port the app listens on, 1-65535. Also passed to the app as `$PORT`. Not used by `worker` |
 | `env` | object | no | Extra environment variables. Keys must match `[A-Za-z_][A-Za-z0-9_]*`. For non-secret values only |
 | `install` | boolean | no | `true` runs the runtime's dependency install at container start: `npm install --omit=dev` when `package.json` exists, `pip install -r requirements.txt` when `requirements.txt` exists. Default `false` |
+| `connector` | `true` or object | no | `worker` on a hosted name only: lets the account's connected AI clients send the app requests (see [Connector calls](#connector-calls)) |
 
 Unknown fields are ignored. An invalid manifest is skipped with a logged
 reason, and the slug keeps serving whatever it served before.
@@ -137,6 +138,34 @@ await env.DB.kv.del('greeting');                // true when it existed
 | Calls at once, per name | 4 |
 
 `examples/guestbook-worker` keeps a guestbook in `env.DB`.
+
+### Connector calls
+
+On a hosted name, the account's connected AI clients (a chat assistant or a
+scheduled agent signed in through the docklets.dev connector) can send a
+worker one HTTP request at a time with the `call_docklet` tool: to seed or
+sync its data, or to check that it answers after a publish. A worker takes
+these calls only when its `app.json` says so:
+
+```json
+{ "runtime": "worker", "entry": "worker.js",
+  "connector": { "methods": ["GET", "POST"], "paths": ["api/"] } }
+```
+
+- `"connector": true` allows every method and path; the name's page at
+  docklets.dev flags such an app.
+- `methods` (optional) lists any of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.
+- `paths` (optional) lists up to 20 prefixes of the path inside the app,
+  matched without the query. A prefix is a plain prefix, so end it with
+  `/`: `"api"` also matches `apiary`.
+- A call outside the lists is refused before it reaches the app. A
+  `connector` value that cannot be read (`"connector": "yes"`) stops the
+  worker, with the reason on the name's page, like an invalid `env`.
+
+[Calling an app from a connector](access.md#calling-an-app-from-a-connector)
+covers who can call and what the app sees. `examples/hello-worker` opts in
+with `true`, and `examples/guestbook-worker` allows `GET` and `POST` under
+`api/`.
 
 A request that crosses a limit answers `546`; a handler that fails to load
 answers `547`, and the reason shows on the name's page at docklets.dev.
