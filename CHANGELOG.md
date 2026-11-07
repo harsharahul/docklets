@@ -6,6 +6,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Connector calls for worker docklets on hosted names: a `connector` key in
+  `app.json` (`true`, or `methods` and `paths` allow lists) lets the
+  account's connected AI clients send the app requests, as the owner, to
+  seed or sync its data or to test it after a publish. The app sees the
+  call like a visitor's request, plus `X-Docklets-Caller: connector`,
+  `X-Docklets-Client` and `X-Docklets-Request-Id`. `docs/manifest.md` and
+  `docs/access.md` describe the key, the headers and the limits.
+- `examples/hello-worker` and `examples/guestbook-worker` allow connector
+  calls and answer `GET api/health`.
+
+### Security
+
+- The gateway removes `X-Docklets-Caller`, `X-Docklets-Client`,
+  `X-Docklets-Request-Id` and `X-Docklets-Connector-Key` from every request,
+  so a visitor cannot pass as a connector call.
+
 ## [0.6.0] - 2026-11-02
 
 ### Added

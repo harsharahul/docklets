@@ -140,6 +140,38 @@ kept drafts private: its access.json exists only on the server. Make it public f
 Pass `--public <slug>` to remove it. Removing the whole slug removes its
 `access.json` with it. A local `access.json` syncs like any other file.
 
+## Calling an app from a connector
+
+On a hosted name, the docklets.dev connector's `call_docklet` tool sends one
+HTTP request to a worker docklet as the account owner. The owner already
+holds every key to their own docklets, so the call needs no link, password,
+or cookie, and `access.json` does not apply to it. It never creates a link
+or a cookie and never changes access. It reaches only the account's own
+names, and only apps whose `app.json` allows it (the `connector` key, see
+[manifest.md](manifest.md#connector-calls)).
+
+The app receives the call the way it receives a visitor's request, with the
+`/<slug>/` prefix stripped and `X-Docklets-Prefix` set, plus:
+
+| Header | Value |
+|---|---|
+| `X-Docklets-Caller` | `connector` |
+| `X-Docklets-Client` | the connection's name as the owner approved it, like `Hermes` or `Claude` |
+| `X-Docklets-Request-Id` | an id for this call, also returned to the client |
+
+The gateway removes these headers from every request that passes through
+it, so on a hosted name an app can rely on `X-Docklets-Caller: connector`
+meaning the owner's connector. `X-Docklets-Client` names the connection; it
+is a label, not proof of which program holds it.
+
+Each call carries at most a 1 MiB body and a 2048-character path and query,
+and has 30 seconds. The client gets up to 256 KB of the answer (the rest is
+cut, and the full size is reported), and redirects come back as they are.
+An account makes at most 60 calls a minute, with at most 4 in flight per
+name. Every call is listed on the name's page at docklets.dev for 30 days
+with its client, method, path without the query, status, and timing;
+bodies and header values are never kept.
+
 ## Configuration
 
 | Variable | Default | |

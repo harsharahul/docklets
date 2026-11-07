@@ -8,11 +8,14 @@ export default {
         headers: { 'content-type': 'text/plain; charset=utf-8' },
       });
     }
+    // A connected AI client can check the app answers right after publishing it.
+    if (url.pathname === '/api/health') return Response.json({ ok: true });
     if (url.pathname === '/echo') {
       return Response.json({
         method: request.method,
         path: url.pathname + url.search,
         prefix: request.headers.get('x-docklets-prefix'),
+        caller: request.headers.get('x-docklets-caller'),
         name: url.searchParams.get('name'),
         body: request.method === 'POST' ? await request.text() : null,
       });

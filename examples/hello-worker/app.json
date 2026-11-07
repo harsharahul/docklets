@@ -1,1 +1,1 @@
-{ "runtime": "worker", "entry": "worker.js", "env": { "GREETING": "hello from a worker" } }
+{ "runtime": "worker", "entry": "worker.js", "env": { "GREETING": "hello from a worker" }, "connector": true }

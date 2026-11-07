@@ -1,1 +1,1 @@
-{ "runtime": "worker", "entry": "worker.js" }
+{ "runtime": "worker", "entry": "worker.js", "connector": { "methods": ["GET", "POST"], "paths": ["api/"] } }
